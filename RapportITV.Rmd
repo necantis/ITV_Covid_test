@@ -1,0 +1,78 @@
+---
+title: "Rapport ITV"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE , warning = FALSE , message = FALSE)
+
+# The knowledge discovery in databases (KDD) process is commonly defined with the stages:
+
+# 1. Selection
+library(xlsx) # Reading participants answers
+
+# 2. Pre-processing
+library(tidyverse) # data analysis
+
+# 3. Transformation
+
+
+# 4. Data mining
+library(quanteda) # Text mining
+
+# 5. Interpretation/evaluation
+library(tufte) # For the Handout. Source: https://rstudio.github.io/tufte/
+
+library(knitr) # # THis way to add KableExtra works ...
+library(kableExtra) # ... Source: https://stackoverflow.com/questions/49044753/scale-kable-table-to-fit-page-width
+
+# Remove NA when printing results
+# Source: https://stackoverflow.com/questions/27626461/hiding-nas-when-printing-a-dataframe-in-knitr
+options(knitr.kable.NA = '')
+
+```
+
+## Section 01
+
+This is section 01:
+
+```{r, include=FALSE}
+
+# Gettings the answers
+answers_raw <- 
+  read.xlsx("data/data.xlsx", header = TRUE, sheetName = "RawData")
+
+```
+
+
+We have collected `r dim(answers_raw)[1]` answers. 
+```{r}
+hist(answers_raw$Q1)
+```
+
+
+
+
+## Section 02
+
+This is section 02:
+
+```{r, echo=FALSE}
+# Libraries
+library(ggplot2)
+library(dplyr)
+
+# Load dataset from github
+data <- read.table("https://raw.githubusercontent.com/holtzy/data_to_viz/master/Example_dataset/1_OneNum.csv", header=TRUE)
+
+# Make the histogram
+data %>%
+  filter( price<300 ) %>%
+  ggplot( aes(x=price)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
