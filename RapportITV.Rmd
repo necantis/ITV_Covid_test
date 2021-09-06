@@ -1,8 +1,8 @@
 ---
 title: "Rapport ITV"
 output:
-  word_document: default
   html_document: default
+  word_document: default
 ---
 
 ```{r, include=FALSE}
@@ -17,10 +17,13 @@ library(xlsx) # Reading participants answers
 library(tidyverse) # data analysis
 
 # 3. Transformation
-
+library(plyr) ## Round_any
+library(tidymodels)
+library(infer)
 
 # 4. Data mining
 library(quanteda) # Text mining
+library(h2o)
 
 # 5. Interpretation/evaluation
 library(tufte) # For the Handout. Source: https://rstudio.github.io/tufte/
@@ -34,45 +37,482 @@ options(knitr.kable.NA = '')
 
 ```
 
-## Section 01
+## Collected data
 
-This is section 01:
+```{r data collection, include=FALSE}
 
-```{r, include=FALSE}
+#Dealing with French characters
+fixAccents <- function (myFrenchText){
+  myTemp <- iconv(myFrenchText, from="UTF-8", to="LATIN1")
+  myTemp
+}
+
+fixAccentsDataframe <- function(myFrenchDataframe){
+  myTempDf <- myFrenchDataframe
+  for(i in 1:dim(myTempDf)[2]){
+    if(typeof(myTempDf[,i])!="integer") # If it's not an integer ...
+      myTempDf[,i]<- fixAccents(myTempDf[,i])
+  }
+  myTempDf
+}
+
 
 # Gettings the answers
-answers_raw <- 
-  read.xlsx("data/data.xlsx", header = TRUE, sheetName = "RawData")
+answers_raw <- fixAccentsDataframe(
+  read.xlsx("data/data.xlsx", header = TRUE, sheetName = "Merged")
+)
+
+
+
+# Clean data and rename columns
+colnames(answers_raw) <-  c(
+"ID",	"Heure de début",	"Heure de fin",	
+"Adresse de messagerie",	"Nom",	"Langue",	
+"Connaissez-vous quelqu'un qui a déjà fait un test COVID ?"	,
+"Pensez-vous que les tests COVID en général sont douloureux ?",	
+"Quel test réalisez-vous le plus fréquemment ?"	,
+"Prendre l'avion"	,
+"Se rendre au travail",	
+"Se rendre à son lieu de formation"	,
+"Voyager dans un autre pays (train, voiture, etc)"	,
+"Voir des proches"	,
+"Activités spécifiques (boites de nuit, compétitions sportives, etc)"	,
+"Evènements (spéctacles, foires, etc)"	,
+"Symptômes",
+"Racontez-moi la dernière expérience que vous avez eu lorsque vous avez fait un test COVID ?"	,
+"Coût"	,
+"Facilité d'accès (proximité du domicile)"	,
+"Délais entre la prise de rdv/achat et le test"	,
+"Simplicité d'utilisation"	,
+"Informations claires"	,
+"Précision des résultats du test"	,
+"Rapidité de la délivrance des résultats"	,
+"Sentiment de sécurité"	,
+"Certification et validité"	,
+"Test PCR (~150 CHF)"	,
+"Test antigénique avec certificat (~30 CHF)"	,
+"Auto-Test après les 5 gratuits (10 CHF)"	,
+"Test PCR (~150 CHF)2"	,
+"Test antigénique avec certificat (~30 CHF)2"	,
+"Auto-Test après les 5 gratuits (10 CHF)2"	,
+"Pour finir ... si vous aviez trois souhaits pour changer les choses lorsque vous vous faites tester, lesquels seraient-ils ?"	,
+"Etape 1 : Rendez-vous"	,
+"Etape 2 : Test"	,
+"Etape 3 : Résultat"	,
+"Pour quelle(s) raison(s) pourriez-vous utiliser cette nouvelle solution de test ?"	,
+"Imaginez maintenant que vous vous trouvez dans la situation spécifique d'une nouvelle vague de COVID en octobre 2021, quelle(s) méthode(s) voudriez-vous utiliser pour vous faire tester ?"	,
+"En faisant l'hypothèse que l'assurance ne paie pas, quel serait selon vous le prix CORRECT  pour cette nouvelle solution de test ?",
+"En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?"	,
+"Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?"	,
+"Expliquez votre choix :"	,
+"Quel est votre âge"	,
+"Sexe"	,
+"Etes-vous vaccinés?"	,
+"Extra: Commentaires"	,
+"Autres",
+"Prix",
+"Connaître les variants",
+"Quel est votre niveau de formation ?"
+)
 
 ```
 
 
 We have collected `r dim(answers_raw)[1]` answers. 
 ```{r}
-hist(answers_raw$Q1)
+# It doesn't look on MS Word ...
+head(answers_raw)%>%
+  knitr::kable()%>%kable_styling(
+    # latex_options="scale_down"
+                 )
+```
+
+```{r, include=FALSE}
+Prix_Correct = as.integer(
+    answers_raw$`En faisant l'hypothèse que l'assurance ne paie pas, quel serait selon vous le prix CORRECT  pour cette nouvelle solution de test ?`)
+
+Prix_Max= as.integer(
+    answers_raw$`En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?`)
+
+Promoter_Score= as.integer(
+    answers_raw$`Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`)
+```
+
+Collected data shows that most people do not think that they should pay for testing (the fair price for most people is below 50 CHF) . 
+But when asked what is the maximum amount they are willing to pay, a new cluster emerges (Graph 02).  
+Indeed, some people are willing to pay 100 CHF for the new test, and they are going to recommend it to other users (NPS).  
+
+```{r}
+# par(3:1)
+hist(Prix_Correct,main="Prix correct")
+hist(Prix_Max,main="Prix Max (envie de payer)")
+hist(Promoter_Score,main="NPS pour 100 CHF")
+
+```
+\newpage
+
+## Looking for Champions
+
+```{r}
+myChampions <- answers_raw%>%
+  mutate(WTP=as.integer(
+           `En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?`)
+         )%>%
+mutate(NPS=as.integer(
+         `Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`)
+         )
+
+
+myChampions%>%
+  group_by(WTP,NPS)%>%
+  dplyr::summarise(n=n())%>%
+  ggplot(aes(x=NPS, y=WTP, size = n)) +
+              geom_point(alpha=0.7)
 ```
 
 
+So how can we predict if a customer is a good customer ? 
+
+We are currently looking for customers 
+
+* that are willing to pay at least 100 CHF and 
+
+* that have an estimated probability to recommend our product of at least 7/10 (every customer with a score below 7 is considered a detractor)
+
+```{r}
+myChampionsList <- myChampions%>%
+  filter(WTP>=100 & NPS>=7)
+
+myNotChampionsList <- myChampions%>%
+  filter(WTP<100 | NPS<7)
 
 
-## Section 02
+myChampionRatio <- round_any(dim(myChampionsList)[1]/dim(myChampions)[1],0.1)
+```
+After 2 rounds of interviews, we had `r dim(myChampionsList)[1]` champions over a total of `r dim(myChampions)[1]` respondents (=`r myChampionRatio`%).
 
-This is section 02:
+\newpage
 
-```{r, echo=FALSE}
-# Libraries
-library(ggplot2)
-library(dplyr)
+## Exploratory Data Analysis with Random Forest
 
-# Load dataset from github
-data <- read.table("https://raw.githubusercontent.com/holtzy/data_to_viz/master/Example_dataset/1_OneNum.csv", header=TRUE)
+In this section, the systems analyzes 70% of the collected data (=0.7 * `r dim(answers_raw)[1]`) and test its model to predict 10 answers.   
+The results are shown below.   
 
-# Make the histogram
-data %>%
-  filter( price<300 ) %>%
-  ggplot( aes(x=price)) +
-    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8)
+```{r}
+
+df<- cbind(myChampions[,35:37],
+           myChampions[,41:42],
+           myChampions[,44:46]
+           # myChampions[,49:51] # No NA Values for Random forest
+           )%>%  
+  dplyr::mutate(Before=factor(ifelse(
+    `Etape 1 : Rendez-vous`== "Équivalent aux tests que j'utilise actuellement","Same",
+        ifelse(`Etape 1 : Rendez-vous`== "Plutôt meilleur que les tests que j'utilise actuellement", "Better", "Worse")
+      )), .keep="unused")%>%
+  dplyr::mutate(During=factor(ifelse(
+    `Etape 2 : Test`== "Équivalent aux tests que j'utilise actuellement","Same",
+        ifelse(`Etape 2 : Test`== "Plutôt meilleur que les tests que j'utilise actuellement", "Better", "Worse")
+      )), .keep="unused")%>%  
+  dplyr::mutate(After=factor(ifelse(
+    `Etape 3 : Résultat`== "Équivalent aux tests que j'utilise actuellement","Same",
+        ifelse(`Etape 3 : Résultat`== "Plutôt meilleur que les tests que j'utilise actuellement", "Better", "Worse")
+      )), .keep="unused")%>%
+  dplyr::mutate(WTP=as.integer(
+           `En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?`), .keep="unused")%>%
+    dplyr::mutate(NPS=as.integer(
+         `Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`), .keep="unused")%>%
+    dplyr::mutate(NPS_Fact=factor(ifelse(NPS<7,"Detractor",ifelse(NPS<9,"Neutral","Supporter"))), .keep="all")%>%
+    dplyr::mutate(Age=factor(`Quel est votre âge`), .keep="unused")%>%
+    dplyr::mutate(Sex=factor(`Sexe`), .keep="unused")%>%  
+    dplyr::mutate(Vaccine=factor(`Etes-vous vaccinés?`), .keep="unused")%>%
+  drop_na()
+  
+# for(i in 1:6){
+#   df[,i] <- factor(df[,i])
+# }
+
+set.seed(1)
+df_split <- initial_split(df, prop = 0.7)
+df_train <- training(df_split)
+df_test <- testing(df_split)
+
+# Tidymodels
+df_recipe <- recipe(NPS_Fact ~ . , data = 
+                    # df_train[,6:9] # Use only demographic data
+                    df_train%>%select(-c(NPS,WTP))
+)
+
+#building model
+df_model <- rand_forest() %>% 
+  set_engine("randomForest") %>% 
+  set_mode("classification")
+
+#workflow
+wf <- workflow() %>%
+   add_recipe(df_recipe) %>%
+   add_model(df_model) 
+
+# Model fit
+model_fit <- wf %>% 
+    parsnip::fit(df)
+
+# Prediction
+rf_test_pred_2 <- 
+  predict(model_fit, df_test) %>% 
+  bind_cols(predict(model_fit, df_test, type = "prob")) %>% 
+  # Add the true outcome data back in
+  bind_cols(df_test %>% select(NPS_Fact))
+
+# myRocAuc <- rf_test_pred_2 %>%                # training set predictions
+#   roc_auc(truth = NPS_Fact, .pred_class)
+
+myAccuracy <- rf_test_pred_2 %>%                # training set predictions
+  accuracy(truth = NPS_Fact, .pred_class)
+
+rf_test_pred_2%>%      
+  knitr::kable()%>%
+  kable_styling("striped")
 
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+The accuracy of the Random forest model is `r myAccuracy$.estimate` (1.0 = 100% being the maximum).
+
+```{r, include=FALSE}
+library(inTrees)
+# https://stackoverflow.com/questions/14996619/random-forest-output-interpretation
+
+
+library(randomForest)
+
+X <- df_train%>%select(-c(NPS,WTP))
+target <- df_train$NPS_Fact
+
+treeList <- RF2List(
+  randomForest(
+              NPS_Fact ~ . , data = 
+                    # rbind(df_train[,6:9],df_train[,6:9]) # Use only demographic data
+                    df_train%>%select(-c(NPS,WTP))
+              , localImp = TRUE
+            )
+  )  # transform rf object to an inTrees' format
+exec <- extractRules(treeList, 
+                     df_train
+                     # rbind(df_train[,6:9],df_train[,6:9])
+                     )  # R-executable conditions
+# exec[1:2,]
+
+# get rule metrics
+ruleMetric <- getRuleMetric(exec,X,target)  
+# ruleMetric[1:2,]
+
+(ruleMetric <- selectRuleRRF(ruleMetric, X, target))
+
+(learner <- buildLearner(ruleMetric, X, target))
+```
+
+The classification rules extracted by the system are ...
+
+```{r}
+presentRules(ruleMetric, colnames(X))%>%
+      as.data.frame()%>%
+    # filter(pred=="1")%>%
+     distinct(len,freq,err,condition,pred)%>%
+      arrange(desc(pred), err, desc(freq), desc(len))%>%
+      knitr::kable()%>%
+      kable_styling("striped")
+
+```
+
+\newpage
+
+## Effect of the customer journey on promoter score
+
+The customer journey seems to have an effect on the willingness to pay of the customers.   
+Nonetheless, the collected sample was fairly small and we predict what is the probability that the results could change, if new data is collected.   
+
+
+```{r}
+
+myChampions_infer <- df%>%
+  mutate(Before_test = factor(
+                      ifelse(
+                        Before %in% c("Worse"),
+                        "Worse",
+                        ifelse(
+                            Before %in% c("Same"),
+                            NA,
+                            "Better"
+                            )
+                          )
+                      )
+            )
+
+
+observed_statistic <- myChampions_infer %>%
+  specify(NPS ~ Before_test) %>%
+  calculate(stat = "diff in means", order = c("Worse","Better"))
+
+# observed_statistic
+
+# generate the null distribution with randomization
+null_dist_2_sample <- myChampions_infer %>%
+  specify(NPS ~ Before_test) %>%
+  hypothesize(null = "independence") %>%
+  generate(reps = 1000, type = "permute") %>%
+  calculate(stat = "diff in means", order = c("Worse","Better"))
+
+
+null_dist_2_sample %>%
+  visualize() + 
+  shade_p_value(observed_statistic,
+                direction = "two-sided")
+
+p_value_2_sample <- null_dist_2_sample %>%
+  get_p_value(obs_stat = observed_statistic,
+              direction = "two-sided")
+
+p_value_2_sample
+```
+
+```{r}
+
+myChampions_infer <- df%>%
+  mutate(During_test = factor(
+                      ifelse(
+                        During %in% c("Worse"),
+                        "Worse",
+                        ifelse(
+                            During %in% c("nothing","Same"),
+                            NA,
+                            "Better"
+                            )
+                          )
+                      )
+            )
+
+
+observed_statistic <- myChampions_infer %>%
+  specify(NPS ~ During_test) %>%
+  calculate(stat = "diff in means", order = c("Worse","Better"))
+
+# observed_statistic
+
+# generate the null distribution with randomization
+null_dist_2_sample <- myChampions_infer %>%
+  specify(NPS ~ During_test) %>%
+  hypothesize(null = "independence") %>%
+  generate(reps = 1000, type = "permute") %>%
+  calculate(stat = "diff in means", order = c("Worse","Better"))
+
+
+null_dist_2_sample %>%
+  visualize() + 
+  shade_p_value(observed_statistic,
+                direction = "two-sided")
+
+p_value_2_sample <- null_dist_2_sample %>%
+  get_p_value(obs_stat = observed_statistic,
+              direction = "two-sided")
+
+p_value_2_sample
+```
+
+```{r}
+
+myChampions_infer <- df%>%
+  mutate(After_test = factor(
+                      ifelse(
+                        After %in% c("Worse"),
+                        "Worse",
+                        ifelse(
+                            After %in% c("nothing","Same"),
+                            NA,
+                            "Better"
+                            )
+                          )
+                      )
+            )
+
+
+observed_statistic <- myChampions_infer %>%
+  specify(NPS ~ After_test) %>%
+  calculate(stat = "diff in means", order = c("Worse","Better"))
+
+# observed_statistic
+
+# generate the null distribution with randomization
+null_dist_2_sample <- myChampions_infer %>%
+  specify(NPS ~ After_test) %>%
+  hypothesize(null = "independence") %>%
+  generate(reps = 1000, type = "permute") %>%
+  calculate(stat = "diff in means", order = c("Worse","Better"))
+
+
+null_dist_2_sample %>%
+  visualize() + 
+  shade_p_value(observed_statistic,
+                direction = "two-sided")
+
+p_value_2_sample <- null_dist_2_sample %>%
+  get_p_value(obs_stat = observed_statistic,
+              direction = "two-sided")
+
+p_value_2_sample
+```
+
+\newpage
+## Appendix: Correct price
+
+```{r}
+# colnames(answers_raw)[40] = "max_WTP"
+# colnames(answers_raw)[41] = "real_WTP"
+
+myCodes <- fixAccentsDataframe(
+  read.xlsx("data/codes.xlsx", header = TRUE, sheetName = "Sheet1")
+)
+
+
+maxWTP <- answers_raw%>%
+  mutate(max_WTP = `En faisant l'hypothèse que l'assurance ne paie pas, quel serait selon vous le prix CORRECT  pour cette nouvelle solution de test ?`)%>%
+  left_join(myCodes, by=c("max_WTP"="Input"))%>%
+  select("Output")
+
+realWTP <- answers_raw%>%  
+  mutate(real_WTP = `En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?`)%>%
+  left_join(myCodes, by=c("real_WTP"="Input"))%>%
+  select("Output")
+
+scores<- data.frame(
+  x= answers_raw$ID,
+  rbind(maxWTP,realWTP),
+  group="Real"
+  )
+
+scores$group[1:dim(maxWTP)[1]] = "Max"
+
+scores %>%
+  ggplot( aes(x=x, y=Output, group=group, color=group)) +
+    geom_line()
+
+library(plyr)
+
+
+meanReal <- round_any(mean(realWTP$Output),.5)
+meanMax <- round_any(mean(maxWTP$Output),.5)
+difMean <- abs(meanMax- meanReal)
+```
+
+-	La courbe bleue montre les prix corrects de la nouvelle solution qu’on partagé les sondés tandis que la courbe orange montre les prix maximaux qu’ils seraient prêts à débourser pour une telle solution
+-	Nous remarquons que la grande majorité des sondés ont défini des prix maximaux qui se trouvent en dessous des prix qu’ils trouvent corrects pour une telle solution. 
+
+-	La moyenne des prix corrects estimés par le panel est de : 	CHF `r meanReal=100`
+-	La moyenne des prix maximaux estimés par le panel est de : 	CHF `r meanMax=100`
+
+-	La différence moyenne entre la perception de ces deux prix est d’environ : 	CHF `r difMean=100`
+
+
+
+```{r}
+
+```
+
