@@ -2,6 +2,7 @@
 title: "Rapport ITV"
 output:
   html_document: default
+  pdf_document: default
   word_document: default
 ---
 
@@ -28,7 +29,7 @@ library(h2o)
 # 5. Interpretation/evaluation
 library(tufte) # For the Handout. Source: https://rstudio.github.io/tufte/
 
-library(knitr) # # THis way to add KableExtra works ...
+library(knitr) # # This way to add KableExtra works ...
 library(kableExtra) # ... Source: https://stackoverflow.com/questions/49044753/scale-kable-table-to-fit-page-width
 
 # Remove NA when printing results
@@ -119,13 +120,7 @@ colnames(answers_raw) <-  c(
 
 
 We have collected `r dim(answers_raw)[1]` answers. 
-```{r}
-# It doesn't look on MS Word ...
-head(answers_raw)%>%
-  knitr::kable()%>%kable_styling(
-    # latex_options="scale_down"
-                 )
-```
+
 
 ```{r, include=FALSE}
 Prix_Correct = as.integer(
@@ -269,9 +264,7 @@ rf_test_pred_2 <-
 myAccuracy <- rf_test_pred_2 %>%                # training set predictions
   accuracy(truth = NPS_Fact, .pred_class)
 
-rf_test_pred_2%>%      
-  knitr::kable()%>%
-  kable_styling("striped")
+rf_test_pred_2%>%knitr::kable()%>%kable_styling("striped")
 
 ```
 
@@ -317,9 +310,7 @@ presentRules(ruleMetric, colnames(X))%>%
       as.data.frame()%>%
     # filter(pred=="1")%>%
      distinct(len,freq,err,condition,pred)%>%
-      arrange(desc(pred), err, desc(freq), desc(len))%>%
-      knitr::kable()%>%
-      kable_styling("striped")
+      arrange(desc(pred), err, desc(freq), desc(len))%>%knitr::kable()%>% kable_styling("striped")
 
 ```
 
@@ -371,8 +362,10 @@ p_value_2_sample <- null_dist_2_sample %>%
   get_p_value(obs_stat = observed_statistic,
               direction = "two-sided")
 
-p_value_2_sample
+
 ```
+
+The probability that the difference between the NPS scores of those who liked the new "Before" stage (wrt those who did not like it) will change, if new data is collected, is: `r round_any(p_value_2_sample$p_value,.01)` (p-value).
 
 ```{r}
 
@@ -382,7 +375,7 @@ myChampions_infer <- df%>%
                         During %in% c("Worse"),
                         "Worse",
                         ifelse(
-                            During %in% c("nothing","Same"),
+                            During %in% c("nothing"),
                             NA,
                             "Better"
                             )
@@ -414,8 +407,9 @@ p_value_2_sample <- null_dist_2_sample %>%
   get_p_value(obs_stat = observed_statistic,
               direction = "two-sided")
 
-p_value_2_sample
 ```
+
+The probability that the difference between the NPS scores of those who liked the new "DUring" stage or thought it was the same (wrt those who did not like it) will change, if new data is collected, is: `r round_any(p_value_2_sample$p_value,.01)` (p-value)
 
 ```{r}
 
@@ -456,12 +450,195 @@ null_dist_2_sample %>%
 p_value_2_sample <- null_dist_2_sample %>%
   get_p_value(obs_stat = observed_statistic,
               direction = "two-sided")
+```
 
-p_value_2_sample
+The probability that the difference between the NPS scores of those who liked the new "After" stage (wrt those who did not like it) will change, if new data is collected, is: `r round_any(p_value_2_sample$p_value,.01)` (p-value)
+
+
+## Effect of the customer journey on the NPS associated with 100 CHF
+
+```{r}
+
+  linear_reg() %>% 
+  set_engine("lm")%>%
+  # set_engine("lm")%>% 
+  fit(I(NPS-1.0) ~ 0 +Age*TestExperience + TestResults, 
+      data = df%>%
+            select(-c(WTP,NPS_Fact))%>%
+            mutate(TestResults = relevel(After, ref = "Same"))%>%
+            mutate(TestExperience = relevel(During, ref = "Same"))%>%
+            mutate(Age = relevel(Age, ref = "<20 ans"))
+  )%>%
+  # fit(NPS ~ ., data = df%>%select(-c(WTP,NPS_Fact)))
+
+  tidy()%>%knitr::kable()%>%kable_styling("striped")
+
+# library(dotwhisker)
+# lm_fit%>%
+#   tidy()%>%
+#   dwplot(dot_args = list(size = 2, color = "black"),
+#          whisker_args = list(color = "black"),
+#          vline = geom_vline(xintercept = 0, colour = "grey50", linetype = 2))
+
+
+myLM <- lm(NPS ~ After+During*Age, data = df%>%select(-c(WTP,NPS_Fact)))%>%summary()
+
+
+```
+
+The linear regression analysis shows that respondents _aged >40_ have the tendency to give at least 7/10 for the NPS (p<0.01).  
+If the _Test result_ phase is perceived as better than the current one, the scores goes up 3 points (p<0.05).
+An loss in quality of _Testing phase_ leads to 1 point less, whereas an improvement in the _Testing phase_ in itself seems to be more problematic to understand: if respondents have less somewhere between 21 and 30 years, there is not effect (-9.5 + 9.35).
+Instead, if they are aged between 41 and 50 years old, the score might be going down 7 points (p>0.40).
+
+Although the model has many variables its explanatory power is fairly good: the Adjusted R2 of the model is `r round_any(myLM$adj.r.squared,.01)`.
+
+```{r, eval=FALSE}
+### Are these coefficients reliable? Results from Bayesan network analysis
+library(rstanarm)
+
+## LM with tidy models; Removing the intercept to smplify the analysis
+# https://www.tidymodels.org/learn/statistics/tidy-analysis/
+# https://stackoverflow.com/questions/7333203/linear-regression-with-a-known-fixed-intercept-in-r
+
+linear_reg() %>% 
+  set_engine("stan")%>%
+  fit(I(NPS-1.0) ~ 0+During+After+Age, data = df%>%select(-c(WTP,NPS_Fact)))%>%
+  tidy(conf.int = TRUE)
+
+
+
+```
+
+
+```{r, eval=FALSE}
+### Results for generalized model
+linear_reg(penalty = double(1), mixture = double(1)) %>% 
+  set_engine("glmnet")%>%
+  fit(NPS ~ During+After+Age, data = df%>%select(-c(WTP,NPS_Fact)))%>%
+  tidy()
+```
+
+
+\newpage
+
+## Analysis of the comments
+```{r}
+library(quanteda)
+library(stm)
+# STM has a problem with RCPP that needs to be solved every time
+# https://stackoverflow.com/questions/68416435/rcpp-package-doesnt-include-rcpp-precious-remove
+# install.packages('Rcpp')
+library(Rcpp) # 
+
+
+covid_corpus <- corpus(
+  myChampions$`Expliquez votre choix :`,
+  docvars = data.frame(
+    text=  myChampions$`Expliquez votre choix :`,
+    scores <-myChampions$`Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`
+  )
+  )
+
+# processed <- textProcessor(covid_corpus$text, 
+#                       metadata = covid_corpus
+#                     )
+# 
+#       out02 <- prepDocuments(processed$documents, processed$vocab, processed$meta)
+
+myDFM <- covid_corpus%>%
+  dfm(remove = stopwords("french"), remove_punct = TRUE, stem = TRUE) %>%
+  dfm_trim(min_termfreq = 2)%>%
+  dfm_select(min_nchar = 3) # INCLUDE PCR
+
+dfm2stm <- convert(myDFM, to = "stm")
+
+colnames(dfm2stm$meta)[2] <- "scores"
+```
+
+
+```{r}
+# findCovidK <- searchK(
+#                  dfm2stm$documents, 
+#                  dfm2stm$vocab,
+#                  K = c(2:20),
+#                  prevalence =~ as.integer(dfm2stm$meta$scores),
+#                  data = dfm2stm$meta,
+#                  verbose=FALSE
+#                  )
+# 
+# save(findCovidK, file = "findCovidK.rda")
+
+load("findCovidK.Rda") # Load file to save time
+
+infoK <- data.frame(
+chosenK  = reshape2::melt(findCovidK$results$K)$value,
+myExclus = reshape2::melt(findCovidK$results$exclus)$value,  
+mySemCoh = reshape2::melt(findCovidK$results$semcoh)$value
+)
+
+ggplot(infoK, aes(x= myExclus, y= mySemCoh)) +
+  geom_line(size = 1.5, alpha = 0.7, show.legend = FALSE) +
+  geom_tile(aes(fill=chosenK))+
+  # facet_wrap(~Metric, scales = "free_y") +
+  labs(x = "Exclusivity",
+       y = "Semantic Coherence",
+       title = "Model diagnostics by number of topics",
+       subtitle = "These diagnostics indicate that a good number of topics would be around 8")
+  
+plot(findCovidK) # Chosen value = 11
+
+```
+
+
+```{r}
+model.stm <- stm(dfm2stm$documents, 
+                 dfm2stm$vocab,
+                 prevalence =~ as.integer(dfm2stm$meta$scores),
+                 K = 6, 
+                 data = dfm2stm$meta, 
+                 init.type = "Spectral",
+                 verbose = FALSE
+               ) 
+
+model.stm%>%plot()
+
+```
+```{r}
+
+df_DFM <- cbind(
+          ID=myChampions$ID
+          , NPS=myChampions$`Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`
+          # , Before = factor(myChampions$`Etape 1 : Rendez-vous`)
+          , During = factor(myChampions$`Etape 2 : Test`)
+          , After = factor(myChampions$`Etape 3 : Résultat`)
+          , Age = factor(myChampions$`Quel est votre âge`)
+        , convert(myDFM,to="data.frame")
+  )
+
+
+
+myLM <- lm(NPS ~ .
+             # After+During*Age
+           , data = df_DFM)%>%summary()
+
+
+```
+
+
+
+\newpage
+
+## Appendix: Collected data
+```{r}
+# It doesn't look well on MS Word ...
+df%>% knitr::kable()%>%kableExtra::kable_styling("striped")
+
 ```
 
 \newpage
-## Appendix: Correct price
+
+## Appendix: Max WTP and WTP
 
 ```{r}
 # colnames(answers_raw)[40] = "max_WTP"
@@ -505,10 +682,10 @@ difMean <- abs(meanMax- meanReal)
 -	La courbe bleue montre les prix corrects de la nouvelle solution qu’on partagé les sondés tandis que la courbe orange montre les prix maximaux qu’ils seraient prêts à débourser pour une telle solution
 -	Nous remarquons que la grande majorité des sondés ont défini des prix maximaux qui se trouvent en dessous des prix qu’ils trouvent corrects pour une telle solution. 
 
--	La moyenne des prix corrects estimés par le panel est de : 	CHF `r meanReal=100`
--	La moyenne des prix maximaux estimés par le panel est de : 	CHF `r meanMax=100`
+-	La moyenne des prix corrects estimés par le panel est de : 	CHF `r meanReal`
+-	La moyenne des prix maximaux estimés par le panel est de : 	CHF `r meanMax`
 
--	La différence moyenne entre la perception de ces deux prix est d’environ : 	CHF `r difMean=100`
+-	La différence moyenne entre la perception de ces deux prix est d’environ : 	CHF `r difMean`
 
 
 
