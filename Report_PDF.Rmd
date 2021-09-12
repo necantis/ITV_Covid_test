@@ -1,0 +1,1286 @@
+---
+title: "Data report: Customer discovery for a new Covid test"
+output: 
+  tufte::tufte_handout: 
+  includes:
+      in_header: header.tex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE , warning = FALSE , message = FALSE)
+
+# The knowledge discovery in databases (KDD) process is commonly defined with the stages:
+
+### 1. Selection
+library(xlsx) # Reading participants answers
+
+### 2. Pre-processing
+library(tidyverse) # data analysis
+
+library(tidytext)
+library(plyr) ## Round_any
+
+### 3. Transformation
+library(quanteda) # Text mining
+library(tidymodels)
+
+### 4. Data mining
+
+library(stm)
+# STM has a problem with RCPP that needs to be solved every time
+# https://stackoverflow.com/questions/68416435/rcpp-package-doesnt-include-rcpp-precious-remove
+# install.packages('Rcpp')
+library(Rcpp) # 
+
+library(infer)
+
+## Diagnostic RL
+# https://stats.idre.ucla.edu/wp-content/uploads/2019/02/R_reg_part2.html#(3)
+library(car)
+library(alr3)
+library(faraway)
+
+
+
+## Interpretation of random forest rules
+# https://stackoverflow.com/questions/14996619/random-forest-output-interpretation
+library(inTrees)
+library(randomForest)
+
+
+# library(h2o) #Does not work with ShinyApps
+
+### 5. Interpretation/evaluation
+library(tufte) # For the Handout. Source: https://rstudio.github.io/tufte/
+
+library(ggplot2) # Graphs
+
+### This way to add KableExtra works ...
+# ... Source: https://stackoverflow.com/questions/49044753/scale-kable-table-to-fit-page-width
+library(knitr) # 
+library(kableExtra) # NB: Before using KableExtra, you need to install Tabu on your MikTek console
+
+library(dotwhisker) # Viz for linear regression
+# library(jtools) # Viz for linear regression (does not handle A*B)
+
+### Remove NA when printing results
+# Source: https://stackoverflow.com/questions/27626461/hiding-nas-when-printing-a-dataframe-in-knitr
+options(knitr.kable.NA = '')
+
+```
+
+
+```{r Data visualization, include=FALSE}
+# Code to manage issues with PDF files
+# Source: https://yihui.org/tinytex/r/#debugging
+options(tinytex.verbose = TRUE)
+
+# Dynamic table formatting
+# Source: https://bookdown.org/yihui/rmarkdown-cookbook/kable.html
+options(knitr.table.format = function() {
+  if (knitr::is_latex_output()) 
+    "latex" else "pandoc"
+})
+
+
+```
+
+# Collected data
+
+```{r data collection, include=FALSE}
+# Gettings the answers
+answers_raw_toClean <- 
+  read.xlsx("data/data.xlsx", header = TRUE, sheetName = "Merged")
+```
+
+
+```{r data cleaning French Accents, include=FALSE}
+
+#Dealing with French characters
+fixAccents <- function (myFrenchText){
+  myTemp <- NULL
+  myTemp <- iconv(myFrenchText, from="UTF-8", to="LATIN1")
+  myTemp
+}
+
+fixAccentsDataframe <- function(myFrenchDataframe){
+  myTempDf <- myFrenchDataframe
+  for(i in 1:dim(myTempDf)[2]){
+    if(typeof(myTempDf[,i])!="integer") # If it's not an integer ...
+      myTempDf[,i]<- fixAccents(myTempDf[,i])
+  }
+  myTempDf
+}
+
+answers_raw <- fixAccentsDataframe(answers_raw_toClean)
+```
+
+
+```{r data cleaning, include=FALSE}
+# Clean data and rename columns
+colnames(answers_raw) <-  c(
+"ID",	"Heure de début",	"Heure de fin",	
+"Adresse de messagerie",	"Nom",	"Langue",	
+"Connaissez-vous quelqu'un qui a déjà fait un test COVID ?"	,
+"Pensez-vous que les tests COVID en général sont douloureux ?",	
+"Quel test réalisez-vous le plus fréquemment ?"	,
+"Prendre l'avion"	,
+"Se rendre au travail",	
+"Se rendre à son lieu de formation"	,
+"Voyager dans un autre pays (train, voiture, etc)"	,
+"Voir des proches"	,
+"Activités spécifiques (boites de nuit, compétitions sportives, etc)"	,
+"Evènements (spéctacles, foires, etc)"	,
+"Symptômes",
+"Racontez-moi la dernière expérience que vous avez eu lorsque vous avez fait un test COVID ?"	,
+"Coût"	,
+"Facilité d'accès (proximité du domicile)"	,
+"Délais entre la prise de rdv/achat et le test"	,
+"Simplicité d'utilisation"	,
+"Informations claires"	,
+"Précision des résultats du test"	,
+"Rapidité de la délivrance des résultats"	,
+"Sentiment de sécurité"	,
+"Certification et validité"	,
+"Test PCR (~150 CHF)"	,
+"Test antigénique avec certificat (~30 CHF)"	,
+"Auto-Test après les 5 gratuits (10 CHF)"	,
+"Test PCR (~150 CHF)2"	,
+"Test antigénique avec certificat (~30 CHF)2"	,
+"Auto-Test après les 5 gratuits (10 CHF)2"	,
+"Pour finir ... si vous aviez trois souhaits pour changer les choses lorsque vous vous faites tester, lesquels seraient-ils ?"	,
+"Etape 1 : Rendez-vous"	,
+"Etape 2 : Test"	,
+"Etape 3 : Résultat"	,
+"Pour quelle(s) raison(s) pourriez-vous utiliser cette nouvelle solution de test ?"	,
+"Imaginez maintenant que vous vous trouvez dans la situation spécifique d'une nouvelle vague de COVID en octobre 2021, quelle(s) méthode(s) voudriez-vous utiliser pour vous faire tester ?"	,
+"En faisant l'hypothèse que l'assurance ne paie pas, quel serait selon vous le prix CORRECT  pour cette nouvelle solution de test ?",
+"En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?"	,
+"Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?"	,
+"Expliquez votre choix :"	,
+"Quel est votre âge"	,
+"Sexe"	,
+"Etes-vous vaccinés?"	,
+"Extra: Commentaires"	,
+"Autres",
+"Prix",
+"Connaître les variants",
+"Quel est votre niveau de formation ?"
+)
+
+```
+
+We have collected `r dim(answers_raw)[1]` answers. Since we collected data out of the building, the distribution of age is not uniform.
+
+```{r Sex and Age, fig.margin = TRUE}
+# https://www.r-graph-gallery.com/48-grouped-barplot-with-ggplot2.html 
+ggplot(
+  data.frame(Sexe=answers_raw$Sexe, Age=answers_raw$`Quel est votre âge`)%>%
+    group_by(Sexe,Age)%>%
+    dplyr::summarise(Answers=n())
+       , aes(fill=Sexe, y=Answers, x=Age)) + 
+    # geom_bar(position="dodge", stat="identity")
+    geom_bar(position="stack", stat="identity")
+```
+
+
+```{r}
+## Convert factor to integer and keep levels
+# https://www.datamentor.io/r-programming/subplot/
+
+# par(mfrow=c(1,2))
+# barplot(prop.table(table(answers_raw$`Quel est votre âge`)))
+# barplot(prop.table(table(answers_raw$Sexe)))
+# 
+# par(mfrow=c(1,1))
+# barplot(prop.table(table(answers_raw$Sexe,answers_raw$`Quel est votre âge`)),beside=TRUE, main="Age distribution across sexes")
+
+```
+
+```{r, include=FALSE}
+Prix_Correct = as.integer(
+    answers_raw$`En faisant l'hypothèse que l'assurance ne paie pas, quel serait selon vous le prix CORRECT  pour cette nouvelle solution de test ?`)
+
+Prix_Max= as.integer(
+    answers_raw$`En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?`)
+
+Promoter_Score= as.integer(
+    answers_raw$`Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`)
+
+PromoterCount <- sum(Promoter_Score>8, na.rm = TRUE)
+PromoterScore <- round_any(100*PromoterCount/length(Promoter_Score),.1)
+DetractorCount <- sum(Promoter_Score<7, na.rm = TRUE)
+DetractorScore <- round_any(100*DetractorCount/length(Promoter_Score),.1)
+NetPromoterScore <- PromoterScore - DetractorScore
+```
+
+
+## Willigness to pay and promoter score
+
+```{marginfigure, echo= TRUE}
+Want to know more about Willigness to pay ? _Hanemann, W. M. (1991). Willingness to pay and willingness to accept: how much can they differ?. The American Economic Review, 81(3), 635-647._[link](https://www.jstor.org/stable/pdf/2006525.pdf?casa_token=tszYCgmKp7MAAAAA:j7XZHp5GXyIARr33dHKCfAVGKXG5JoEYE6rXsE-6R1CSoDW1_VncOLqvGaZ-pew6u4G6p-UyOGnW_aOE6-lmaLLmt-17gVIgtzTm7g9KLPVW3mdZ_lPMww)
+```
+
+Collected data about the _Fair price_ shows that most people do not think that they should pay for testing. The median for the _Fair price_ is `r round_any(median(Prix_Correct, na.rm = TRUE),.5) `.  
+
+```{r Fair Hist, fig.margin = TRUE}
+hist(Prix_Correct,main="Fair Price", xlim=c(0,250), ylim=c(0,25))
+```
+
+Nonetheless, when asked what is the _Maximum amount they are Willing To Pay (WTP)_, it is possible to see different customer segments. The median for the _WTP_ is `r round_any(median(Prix_Max, na.rm = TRUE),.5) `.  
+
+```{r WTP Hist, fig.margin = TRUE}
+hist(Prix_Max,main="Max Price (WTP)", xlim=c(0,250), ylim=c(0,25))
+```
+
+```{r, Fair and WTP Together, eval=FALSE}
+# make labels and margins smaller
+par(cex=0.7, mai=c(0.1,0.1,0.3,0.3))
+
+# define area for the Max price
+par(fig=c(0.1,0.5,0,1))
+hist(Prix_Correct,main="Fair Price", xlim=c(0,250), ylim=c(0,25))
+
+# define area for the WTP
+par(fig=c(0.6,1,0,1), new=TRUE)
+hist(Prix_Max,main="Max Price (WTP)", xlim=c(0,250), ylim=c(0,25))
+```
+
+In the end, we are interested in how many respondent are willing to pay 100 CHF for the new test, and they are going to recommend it to other users. The third image shows the distribution of the likelihood that respondent will recommend the service, also know as _Net Promoter Score (NPS)_.  The *Promoters* (NPS>8) represent `r PromoterCount` of the total and the *Detractors* (NPS<7) represent `r DetractorCount` of the total; hence, the _NPS_ is: `r PromoterScore`% - `r DetractorScore`% = `r PromoterScore - DetractorScore`%.
+
+```{marginfigure, echo= TRUE}
+Want to know more about the NPS approach ? _Reichheld, F. F. (2003). The one number you need to grow. Harvard business review, 81(12), 46-55_[link](https://hbr.org/2003/12/the-one-number-you-need-to-grow)
+```
+
+```{r NPS Barplot Side, fig.margin = TRUE}
+hist(Promoter_Score,main="NPS for  CHF 100")
+```
+
+```{r NPS WTP MaxPrice Age, eval=FALSE}
+### Arranging graphs with par()
+# https://www.datamentor.io/r-programming/subplot/
+
+# make labels and margins smaller
+par(cex=0.7, mai=c(0.1,0.1,0.3,0.3))
+
+# define area for the Max price
+par(fig=c(0.1,0.5,0.6,1))
+hist(Prix_Correct,main="Fair Price", xlim=c(0,250), ylim=c(0,25))
+
+# define area for the WTP
+par(fig=c(0.1,0.5,0.1,0.5), new=TRUE)
+hist(Prix_Max,main="Max Price (WTP)", xlim=c(0,250), ylim=c(0,25))
+
+# define area for the NPS graph
+par(fig=c(0.6,1,0.6,1), new=TRUE)
+hist(Promoter_Score,main="NPS for  CHF 100")
+
+# define area for the Age
+par(fig=c(0.6,1,0.1,0.5), new=TRUE)
+barplot(prop.table(table(answers_raw$`Quel est votre âge`)))
+
+
+```
+
+
+## Looking for Champions
+
+A good customer has a good customer lifetime value (CLV) and a good customer referral value (CRV).
+```{marginfigure, echo= TRUE}
+Want to know more about CLV and CRV ? _Kumar, V., Petersen, J. A., & Leone, R. P. (2007). How valuable is word of mouth?. Harvard business review, 85(10), 139._[link](https://hbr.org/2007/10/how-valuable-is-word-of-mouth)
+```
+
+We are currently looking for customers 
+
+* that are willing to pay at least 100 CHF( _Customer lifetime value_ ) 
+
+* that have an estimated probability to recommend our product of at least 7/10 ( _Customer referral value_ )
+
+We have conducted empirical surveys in two steps: (1) in the first step, we have assessed what is the solution currently used and which are the features, which the respondent considers important for the perfect solution; (2) in the second step, we have performed conjoint analysis, showing to the respondent an alternative and assessing the change in WTP.
+
+
+
+```{r Champions, include=FALSE}
+myChampions <- answers_raw%>%
+  mutate(WTP=as.integer(
+           `En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?`)
+         )%>%
+mutate(NPS=as.integer(
+         `Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`)
+         )
+
+### CHAMPION GRAPH NOT INCLUDED
+
+# myChampions%>%
+#   group_by(WTP,NPS)%>%
+#   dplyr::summarise(n=n())%>%
+#   ggplot(aes(x=NPS, y=WTP, size = n)) +
+#               geom_point(alpha=0.7)
+
+
+myChampionsList <- myChampions%>%
+  filter(WTP>=100 & NPS>=7)
+
+myNotChampionsList <- myChampions%>%
+  filter(WTP<100 | NPS<7)
+
+myChampionRatio <- round_any(100*dim(myChampionsList)[1]/dim(myChampions)[1],0.1)
+```
+
+After 2 rounds of interviews, we had `r dim(myChampionsList)[1]` champions over a total of `r dim(myChampions)[1]` respondents (=`r myChampionRatio`%).
+
+In the following sections, we shall try to predict how to obtain a customer willing to pay 100 CHF and we will use the net promoter score (NPS) as dependent variable.
+
+
+\newpage
+
+# Effect of the customer journey on the NPS associated with 100 CHF
+
+The "forest plot” shows the value of the coefficients of the linear regression analysis and their 95% confidence interval.  
+
+```{marginfigure, echo= TRUE}
+Want to know more about testing WTP? _Breidert, C., Hahsler, M., & Reutterer, T. (2006). A review of methods for measuring willingness-to-pay. Innovative marketing, 2(4), 8-32._[link](http://www.reutterer.com/papers/breidert&hahsler&reutterer_2006.pdf)
+```
+
+Model 01 takes into account: 
+(A) if the respondent thinks that the new solution improve the three steps of the customer journey (before the service, during the service and after the service);
+(B) the age of the respondent;
+(C) if the respondent is vaccinated.   
+
+Model 02 is more parsimonious, and it takes into account: 
+(A) two steps of the customer journey: during the test and after the test,
+(B) the age of the respondent
+
+```{marginfigure, echo= TRUE}
+Each variable about the customer journey is categorical, meaning that it can have one of five possible values:
+
+(I) the new service is better than the current one,  
+(II) the new service is a little bit better than the current one,  
+(III) the new service is the same as the current one,  
+(IV) the new service is a little bit worse than the current one,  
+(V) the new service is a worse than the current one.
+```
+
+Finally, both models analyze the interaction between the score of the During phase and the age, to see if people answered differently according to the age.
+
+```{r Creating Df}
+df<- cbind(myChampions[,35:37],
+           myChampions[,41:42],
+           myChampions[,44:46]
+           # myChampions[,49:51] # No NA Values for Random forest
+           )%>%  
+  dplyr::mutate(Before=factor(`Etape 1 : Rendez-vous`), .keep="unused")%>%
+  dplyr::mutate(During=factor(`Etape 2 : Test`), .keep="unused")%>%  
+  dplyr::mutate(After=factor(`Etape 3 : Résultat`), .keep="unused")%>%
+  dplyr::mutate(WTP=as.integer(
+           `En faisant l'hypothèse que l'assurance ne paie pas, quel serait le prix MAXIMAL que vous seriez prêt(e) à payer pour cette nouvelle solution de test ?`), .keep="unused")%>%
+    dplyr::mutate(NPS=as.integer(
+         `Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`), .keep="unused")%>%
+    dplyr::mutate(NPS_Fact=factor(ifelse(NPS<7,"Detractor",ifelse(NPS<9,"Neutral","Supporter"))), .keep="all")%>%
+    dplyr::mutate(Age=factor(`Quel est votre âge`), .keep="unused")%>%
+    dplyr::mutate(Sex=factor(`Sexe`), .keep="unused")%>%  
+    dplyr::mutate(Vaccine=factor(`Etes-vous vaccinés?`), .keep="unused")%>%
+  drop_na(NPS)
+```
+
+```{r}
+
+myLM<-  linear_reg() %>% 
+  set_engine("lm")%>%
+  # set_engine("lm")%>% 
+  fit(NPS ~ 0 +Age*TestExperience + TestResults, 
+      data = df%>%
+            select(-c(WTP,NPS_Fact))%>%
+            mutate(TestResults = relevel(After, ref = "Équivalent aux tests que j'utilise actuellement"))%>%
+            mutate(TestExperience = relevel(During, ref = "Équivalent aux tests que j'utilise actuellement"))%>%
+            mutate(Age = relevel(Age, ref = "<20 ans"))
+  )
+
+```
+
+
+```{r Model 01}
+myLM_base <- lm(NPS ~ Before+Vaccine+After+During*Age , data = df)
+# 
+
+df_simple <- df%>%
+  mutate(Before = ifelse(
+                        Before %in% c("Plutôt meilleur que les tests que j'utilise actuellement",
+                                     "Meilleur que les tests que j'utilise actuellement")
+                        , "Better"
+                        , ifelse(
+                              Before =="Équivalent aux tests que j'utilise actuellement"
+                              , "Same"
+                              , "Worse"
+                              )
+                        ), .keep="unused")%>%
+  mutate(During = ifelse(
+                        During %in% c("Plutôt meilleur que les tests que j'utilise actuellement",
+                                     "Meilleur que les tests que j'utilise actuellement")
+                        , "Better"
+                        , ifelse(
+                              During =="Équivalent aux tests que j'utilise actuellement"
+                              , "Same"
+                              , "Worse"
+                              )
+                        ), .keep="unused")%>%
+  mutate(After = ifelse(
+                        After %in% c("Plutôt meilleur que les tests que j'utilise actuellement",
+                                     "Meilleur que les tests que j'utilise actuellement")
+                        , "Better"
+                        , ifelse(
+                              After =="Équivalent aux tests que j'utilise actuellement"
+                              , "Same"
+                              , "Worse"
+                              )
+                        ), .keep="unused")
+```
+
+```{r Figure Model 01 Model 02, fig.fullwidth = TRUE}
+### DOTWHISKER to explain linear regression
+
+# https://cran.r-project.org/web/packages/dotwhisker/vignettes/dotwhisker-vignette.html
+  dwplot(list(
+          lm(NPS ~ 0+Vaccine+Before+After+During*Age , data = df),
+          lm(NPS ~ 0+After+During*Age , data = df)
+          ),
+         # dot_args = list(size = 2, color = "black"),
+         # whisker_args = list(color = "black"),
+         vline = geom_vline(xintercept = 0, colour = "grey50", linetype = 2),
+         vars_order = c("Before", "During", "After", "Age", "Vaccine"),
+         model_order = c("M0del 1", "Model 2")
+         )+
+    theme_bw(base_size = 4) + 
+    # Setting `base_size` for fit the theme
+    # No need to set `base_size` in most usage
+    xlab("Coefficient Estimate") + ylab("") +
+    geom_vline(xintercept = 0,
+               colour = "grey60",
+               linetype = 2) +
+    ggtitle("Predicting NPS") +
+    theme(
+        plot.title = element_text(face = "bold"),
+        legend.position = c(0.01, 0.01),
+        legend.justification = c(0, 0),
+        legend.background = element_rect(colour = "grey80"),
+        legend.title = element_blank()
+    ) 
+
+```
+
+
+Model 02 shows that Age plays an important role in the NPS: 
+
+(1) respondents _aged >40_ have the tendency to give a positive NPS.  
+(2) respondents aged between 41 and 50 years old that the _Testing phase_ is fairly better will give a smaller NPS.
+
+```{marginfigure, echo= TRUE}
+Due to the small amount of data collected, most of the 95% confidence intervals do not allow to assess if the coefficients have a positive/negative effect.
+
+Want to know more about Adjusted R2? [link](https://en.wikipedia.org/wiki/Coefficient_of_determination#Adjusted_R2)
+```
+  
+Model 01 has many variables and its Adjusted R2 is `r round_any((myLM_base%>%glance())$adj.r.squared,.01)`.
+Model 02 is more parsimonious and its Adjusted R2 is `r round_any((myLM%>%glance())$adj.r.squared,.01)`. 
+
+\newpage
+
+# Analysis of the comments
+```{r, include=FALSE}
+myChampions_filtered <- myChampions%>%
+  mutate(NPS = as.integer(myChampions$`Très bien. Maintenant faites l'hypothèse que cette solution puisse être offerte à 100CHF/test. Quelle est la probabilité que vous la recommandiez à un ami(e) ou à un de vos proches ?`)) %>%
+  drop_na(NPS,`Expliquez votre choix :`)
+
+covid_corpus <- corpus(
+  myChampions_filtered$`Expliquez votre choix :`,
+  docvars = data.frame(
+    text=  myChampions_filtered$`Expliquez votre choix :`,
+    scores = myChampions_filtered$NPS
+  )
+)
+
+# processed <- textProcessor(covid_corpus$text, 
+#                       metadata = covid_corpus
+#                     )
+# 
+#       out02 <- prepDocuments(processed$documents, processed$vocab, processed$meta)
+
+myDFM <- covid_corpus%>%
+  dfm(remove = stopwords("french"), remove_punct = TRUE, stem = TRUE) %>%
+  dfm_trim(min_termfreq = 2)%>%
+  dfm_select(min_nchar = 3) # INCLUDE PCR
+
+dfm2stm <- convert(myDFM, to = "stm")
+
+colnames(dfm2stm$meta)[2] <- "scores"
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+# findCovidK <- searchK(
+#                  dfm2stm$documents, 
+#                  dfm2stm$vocab,
+#                  K = c(2:20),
+#                  prevalence =~ as.integer(dfm2stm$meta$scores),
+#                  data = dfm2stm$meta,
+#                  verbose=FALSE
+#                  )
+# 
+# save(findCovidK, file = "findCovidK.rda")
+
+load("findCovidK.Rda") # Load file to save time
+
+infoK <- data.frame(
+chosenK  = reshape2::melt(findCovidK$results$K)$value,
+myExclus = reshape2::melt(findCovidK$results$exclus)$value,  
+mySemCoh = reshape2::melt(findCovidK$results$semcoh)$value
+)
+
+ggplot(infoK, aes(x= myExclus, y= mySemCoh)) +
+  geom_line(size = 1.5, alpha = 0.7, show.legend = FALSE) +
+  geom_tile(aes(fill=chosenK))+
+  # facet_wrap(~Metric, scales = "free_y") +
+  labs(x = "Exclusivity",
+       y = "Semantic Coherence",
+       title = "Model diagnostics by number of topics",
+       subtitle = "These diagnostics indicate that a good number of topics would be around 8")
+  
+plot(findCovidK) # Chosen value = 9
+
+```
+
+
+```{r, include=FALSE}
+model.stm <- stm(dfm2stm$documents, 
+                 dfm2stm$vocab,
+                 prevalence =~ as.integer(dfm2stm$meta$scores),
+                 K = 9, 
+                 data = dfm2stm$meta, 
+                 init.type = "Spectral",
+                 verbose = FALSE
+               ) 
+
+model.stm%>%plot()
+
+```
+
+```{marginfigure, echo= TRUE}
+A word cloud represents the most used keywords, which have been processed to be aggregated:
+
+* Stemming: the end of the words have been removed, to combine similar words 
+* Stopwords: stopwords such as "the" and "or" have been removed. Some stopwords have not been recognized by the french dictionary.
+* Filter: only words with more than 3 characters have been kept. We wanted to keep "PCR", so we fixed min characters = 3.   
+
+Want to know more about the process? [link](https://en.wikipedia.org/wiki/Text_mining#Text_analysis_processes)
+```
+
+The comments concerning net promoter score are known to be very useful to understand the underlying reasons of the participants.   
+
+The polarized word cloud allows to identify the keywords that are specific to each type of participant.
+
+The second wordcloud shows the keywords that are specific the promoter group.
+
+```{r Wordcloud}
+# https://quanteda.io/reference/textplot_wordcloud.html
+isChampion <- ifelse(docvars(covid_corpus, "scores")>8,"Promoter",ifelse(docvars(covid_corpus, "scores")>6,"Passive","Detractor"))
+
+
+myCloud <- covid_corpus%>%
+  dfm(remove = stopwords("french"), remove_punct = TRUE, stem = TRUE) %>%
+  # dfm_trim(min_termfreq = 2)%>%
+  dfm_select(min_nchar = 3)%>%
+  dfm(groups = isChampion) # https://quanteda.io/reference/textstat_keyness.html
+
+# make labels and margins smaller
+par(cex=.9, mai=c(0,0,0.1,0.1))
+
+set.seed(5)
+# define area for the Max price
+par(fig=c(0,0.7,0,1))
+myCloud%>%textplot_wordcloud(comparison = TRUE, max_words = 300)
+
+par(fig=c(0.7,1,0,1), new=TRUE)
+myCloud%>% textstat_keyness(target = "Promoter")%>%textplot_wordcloud()
+
+```
+
+## Semantic network to indetify relevant topics
+
+```{marginfigure, echo= TRUE}
+Sometimes, it is wise to see how keywords are linked together.  
+
+Want to know more about semantic networks? [link](https://en.wikipedia.org/wiki/Semantic_network)
+```
+
+The semantic network shows that there are two clusters around the word _"nouveau"_ and _"trop"_, whereas _"test"_ seems to be a central concept and _"pcr"_ the link between the two clusters.
+
+```{r}
+### Make semantic network
+  
+myFCM <- myDFM%>%
+  fcm()
+
+# myFCM%>%textplot_network(tryCatch({min_freq = input$myCorr_topics},error=function(e){min_freq = .95})) # TryCatch allows test offline  
+
+```
+
+```{r}
+myTopFeatures <- myFCM%>%
+  topfeatures(n=30,decreasing = TRUE
+              # , scheme = "count"
+              , scheme = "docfreq"
+              # , groups = "author"
+              )%>%names()
+
+# Create dataframe with topics from STM
+# https://juliasilge.com/blog/sherlock-holmes-stm/
+myChosenTopics <- model.stm%>%
+      tidy()%>%
+        group_by(topic) %>%
+        top_n(3, beta) %>%
+        arrange(topic,beta)%>%
+        ungroup()
+
+### Add words from topics in the list
+feat <- c(
+  myChosenTopics$term, # Select only the column TERMS to have a character vector 
+  myTopFeatures # Add the list obtained with Quanteda
+  )
+
+### Filter networks from list of relevant words
+# https://quanteda.io/reference/textplot_network.html
+myNiche <- myFCM%>%
+    fcm_select(pattern = feat) 
+
+### Define colors
+# https://r-charts.com/colors/
+myColorsList <- c("blue","brown1","burlywood4","cadetblue4",
+              "#458B00","#8B4513","#EE6A50","#FF1493",
+              "#B22222","darkgoldenrod2","darkolivegreen3","#EE7600",
+              "#68228B","#C1FFC1","#2F4F4F","#FF1493")
+
+### The FCM Matrix is made in an order that does not respect the order of the topics
+## Step 1: We start by creating a dataframe with colors and size for each word
+
+myNicheInfoLong <- data.frame(
+      term=rownames(myNiche)
+      # , myColor=rep("black",dim(myNiche)[1])
+      # , myLabelSize=rep(3,dim(myNiche)[1])
+  )%>%
+  left_join(myChosenTopics, by=c("term"="term"))%>% #Left join with topicslist (This doubles some items in multiple topics)
+  group_by(term)%>%
+  dplyr::summarize(topic=max(topic),mean(beta),n=n())%>%
+  mutate(myColor = ifelse(is.na(topic), "black", myColorsList[topic]))%>%
+  mutate(myLabelSize = ifelse(is.na(topic), 3, 7))
+
+## Step 2: Since summarize changes the order of the list, do again a left join
+myNicheInfo <- data.frame(
+      term=rownames(myNiche)
+  )%>%
+  left_join(myNicheInfoLong, by=c("term"="term"))  
+
+### Create smeantic network with colors
+set.seed(12) # Seed to get the same results every time
+myNetwork <- myNiche %>%
+    textplot_network(min_freq = 0.95
+                   , vertex_labelcolor = myNicheInfo$myColor
+                   # , vertex_labelcolor = c(rep('gray40',10),rep('blue', 20))
+                   , vertex_labelsize = myNicheInfo$myLabelSize
+                     # , vertex_labelsize = 0.1*rowSums(myNiche)/min(rowSums(myNiche)))
+                     )
+```
+
+
+```{r}
+set.seed(12) # Seed to get the same results every time
+
+# # make labels and margins smaller
+# par(cex=0.7, mai=c(0.1,0.1,0.1,0.1))
+# 
+# # define area for the Max price
+# par(fig=c(0.1,0.7,0,1))
+# myCloud%>%textplot_wordcloud()
+# 
+# par(fig=c(0.7,1,0,1), new=TRUE)
+myNiche %>%
+    textplot_network(min_freq = 0.95
+                   , vertex_labelcolor = myNicheInfo$myColor
+                   # , vertex_labelcolor = c(rep('gray40',10),rep('blue', 20))
+                   , vertex_labelsize = myNicheInfo$myLabelSize
+                     # , vertex_labelsize = 0.1*rowSums(myNiche)/min(rowSums(myNiche)))
+                     )
+
+
+```
+
+
+```{r}
+df_DFM <- cbind(
+          NPS= myChampions_filtered$NPS
+          , Before = factor(myChampions_filtered$`Etape 1 : Rendez-vous`)
+          , During = factor(myChampions_filtered$`Etape 2 : Test`)
+          , After = factor(myChampions_filtered$`Etape 3 : Résultat`)
+          , Age = factor(myChampions_filtered$`Quel est votre âge`)
+          , Vaccine = factor(myChampions_filtered$`Etes-vous vaccinés?`)
+        , convert(myDFM,to="data.frame")%>%
+          select(
+            moin, trop, cher, util, antigéniqu,
+            prix, plus, nouveau, justifi,
+            pcr, solut, 
+            variant, élevé,
+            risqu,
+            test
+                 )
+  )
+```
+
+\newpage
+
+## Improved linear regression by using relevant keywords
+
+```{r}
+
+# myLM_DFM <- linear_reg() %>% 
+#   set_engine("lm")%>%
+#   # set_engine("lm")%>% 
+#   fit(I(NPS-1.0) ~ 0 +TestResults+Age*TestExperience + nouveau + trop , 
+#       data = df_DFM%>%
+#             mutate(TestResults = relevel(After, ref = "Équivalent aux tests que j'utilise actuellement"))%>%
+#             mutate(TestExperience = relevel(During, ref = "Équivalent aux tests que j'utilise actuellement"))%>%
+#             mutate(Age = relevel(Age, ref = "<20 ans"))
+#   )
+
+
+df_DFM_02 <- df_DFM%>%
+            mutate(Before = relevel(Before, ref = "Équivalent aux tests que j'utilise actuellement"), .keep="unused")%>%
+            mutate(During = relevel(During, ref = "Équivalent aux tests que j'utilise actuellement", .keep="unused"))%>%
+            mutate(After = relevel(After, ref = "Équivalent aux tests que j'utilise actuellement"), .keep="unused")%>%
+            mutate(Age = relevel(Age, ref = "<20 ans", .keep="unused"))%>%
+            select(NPS,Before,During,After,Age,Vaccine,nouveau,trop,pcr,test, élevé) # The dependent variable should be first to allow broom::Augment function
+
+# df_DFM_02 <- df_DFM_02[-26,] # Removing the row 26 after Bonferroni test for outliers
+
+
+myLM_DFM <- lm(NPS ~ 0 +After+Age*During + nouveau + trop , 
+      data = df_DFM_02
+      )
+
+```
+
+```{marginfigure, echo= TRUE}
+Want to know more about mixed methodology that combined qualitative surveys and quantitative analyses? Malina, M. A., Nørreklit, H. S., & Selto, F. H. (2011). Lessons learned: advantages and disadvantages of mixed method research. Qualitative Research in Accounting & Management. [link](https://www.emerald.com/insight/content/doi/10.1108/11766091111124702/full/html)
+```
+
+The new linear regression analysis confirms the trends of the previous models, with a more precise confidence interval.
+The two words are clearly associated to a positive and negative effect on the NPS, suggesting a brand strategy to adress the Champions.
+Although the model has many variables its explanatory power is fairly good: the Adjusted R2 of the model is `r round_any((myLM_DFM%>%glance())$adj.r.squared,.01)`.
+
+```{r Model 03, fig.fullwidth = TRUE}
+### DOTWHISKER to explain linear regression
+
+# https://cran.r-project.org/web/packages/dotwhisker/vignettes/dotwhisker-vignette.html
+  dwplot(list(
+          lm(NPS ~ 0+Vaccine+Before+After+During*Age , data = df_DFM_02),
+          lm(NPS ~ 0+After+During*Age , data = df_DFM_02),          
+          lm(NPS ~ 0+After+During*Age + nouveau + trop , data = df_DFM_02)
+          ),
+         # dot_args = list(size = 2, color = "black"),
+         # whisker_args = list(color = "black"),
+         vline = geom_vline(xintercept = 0, colour = "grey50", linetype = 2),
+         vars_order = c("Before", "During", "After", "Age", "Vaccine"),
+         model_order = c("M1: Simple", "M2: Complete", "M3: Mixed")
+         )+
+    theme_bw(base_size = 5) + 
+    # Setting `base_size` for fit the theme
+    # No need to set `base_size` in most usage
+    xlab("Coefficient Estimate") + ylab("") +
+    geom_vline(xintercept = 0,
+               colour = "grey60",
+               linetype = 2) +
+    ggtitle("Predicting NPS") +
+    theme(
+        plot.title = element_text(face = "bold"),
+        legend.position = c(0.01, 0.01),
+        legend.justification = c(0, 0),
+        legend.background = element_rect(colour = "grey80"),
+        legend.title = element_blank()
+    ) 
+```
+
+## Performance indicators - Part 1
+
+The first part of the performance indicators of the three models shows allows to assess the goodness of fit of each statistical model to a sample of data for given values of the unknown parameters.
+
+```{marginfigure, echo= TRUE}
+The first model did not take into consideration the interaction between Age and During. Its Adjusted R squared (R2) was low and the log-likelihood of the model (LogLik) was not very good. 
+```
+
+```{r}
+# AIC/BIC https://stats.stackexchange.com/questions/577/is-there-any-reason-to-prefer-the-aic-or-bic-over-the-other
+# Deviance: https://www.casact.org/sites/default/files/presentation/rpm_2017_presentations_pm-lm-4_2.pdf
+
+myLR_Scores_raw <- rbind(
+  myLM_base%>%glance(),
+  myLM%>%glance(),
+  myLM_DFM%>%glance()
+  )
+
+myLR_Scores <- cbind(Model=c("M1","M2","M3"),myLR_Scores_raw)
+
+myLR_Scores[,1:6]%>%
+  knitr::kable()
+```
+
+
+```{r Model 03 Table}
+
+### Controlling the size of columns
+# https://stackoverflow.com/questions/29425499/wrap-long-text-in-kable-table-column
+
+myLM_DFM%>%
+  tidy()%>%
+  drop_na()%>% # Remove empty lines in the linear regression
+  knitr::kable()%>%
+    column_spec(1, width = "20em")#%>%column_spec(3, width = "5em")
+# %>%kable_styling("striped")
+# %>% kable_styling(latex_options="scale_down") # This can be used for tables that are too big
+
+```
+
+
+## Performance indicators - Part 2
+
+The residual deviance of Model 2 increased, meaning that it did not fully exploit the potential of the new variables to get closer to the Saturated model – the model with the highest possible likelihood. Instead, Model 03 added 2 new variables _"nouveau"_ and _"trop"_ without getting worse AIC/BIC results. 
+
+```{r}
+myLR_Scores[,7:12]%>%
+  knitr::kable()
+
+```
+
+```{marginfigure, echo= TRUE}
+Model 02 removed variables that were not needed, such as Vaccine and Before. Hence, the indicator that penalize a high number of variables improved: Adjusted R squared,  Akaike's Information Criterion (AIC) and Bayesian Information Criterion for the model (BIC).
+```
+\newpage
+
+## Predictions on the overall dataset - Part 01
+```{r Predictions on dataset}
+
+myLM_DFM_aug <- augment(myLM_DFM)
+
+myLM_DFM_aug_df <- cbind(myLM_DFM_aug%>%select(During,After,Age,nouveau,trop,
+         NPS),
+         fitted=round_any(myLM_DFM_aug$.fitted,.01),
+         resid=round_any(myLM_DFM_aug$.resid,.01)
+        )%>%
+  arrange(desc(resid))
+
+myLongText <- "10em"
+
+myLM_DFM_aug_df[1:(dim(df)[1]/3),]%>%
+  knitr::kable()%>%
+column_spec(1, width = myLongText)%>%column_spec(2, width = myLongText)%>%column_spec(3, width = "4em")
+
+```
+
+## Predictions on the overall dataset - Part 02
+```{r}
+myLM_DFM_aug_df[(dim(df)[1]/3):(2*dim(df)[1]/3),]%>%
+  knitr::kable()%>%
+column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = "4em")
+
+```
+
+## Predictions on the overall dataset - Part 03
+```{r}
+myLM_DFM_aug_df[(2*dim(df)[1]/3):(dim(df)[1]),]%>%
+  knitr::kable()%>%
+column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = "4em")
+
+```
+\newpage
+
+# Does it really work ? More testing Model 03
+
+```{r Parameters iterations}
+myIterations <- 100
+rsq2_avg <- rep(NA,myIterations)
+myProp <- 0.7
+```
+
+Predicting all values used to train the model is not very complicated.   
+Hence, we trained the model with `r 100*myProp`% of the data and testing it with the remaining data.  
+We perform `r myIterations` iterations with different seeds, and we show here the results.  
+
+```{r Training and Testing}
+for(i in 1:myIterations){
+
+set.seed(i)
+rf_test_pred_2 <- NA
+
+df_split <- initial_split(
+  # rbind(df_DFM_02,df_DFM_02,df_DFM_02)# Data Augmentation
+  df_DFM_02
+  , prop = myProp
+  # , strata=After
+  )
+df_train <- training(df_split)
+df_test <- testing(df_split)
+
+# Model fit with Tidymodels
+model_fit <- linear_reg() %>% 
+  set_engine("lm")%>%
+  fit(NPS ~ After+Age*During + nouveau + trop, data=df_train)
+
+# Prediction
+tryCatch(
+  {
+  rf_test_pred_2 <- 
+  predict(model_fit, df_test) %>% 
+  bind_cols(df_test %>% select(NPS))   # Add the true outcome data back in
+  }, error=function(e){}
+  )
+
+# ggplot(data = rf_test_pred_2,
+#        mapping = aes(x = .pred, y = NPS)) +
+#   geom_point(color = '#006EA1', alpha = 0.25) +
+#   geom_abline(intercept = 0, slope = 1, color = 'orange') +
+#   labs(title = paste('NPS for 100 CHF (R2=',round_any(rsq(rf_test_pred_2, NPS, .pred)$.estimate,.01),')'),
+#        x = 'Predicted NPS',
+#        y = 'Actual NPS')
+
+tryCatch(
+  {
+rsq2_avg[i] <- rsq(rf_test_pred_2, NPS, .pred)$.estimate
+  }, error=function(e){}
+  )
+
+
+}
+
+myR2 <- data.frame(R2=round_any(rsq2_avg,.05))%>%group_by(R2)%>%dplyr::summarise(Freq=n())
+
+myNA <- sum(is.na(rsq2_avg))
+myMedian <- round_any(median(rsq2_avg, na.rm = TRUE ),.01)
+```
+
+
+```{r, fig.margin = TRUE}
+ggplot(myR2, aes(R2, Freq)) +     
+  geom_col(position = 'dodge')
+
+```
+
+After `r myIterations` iterations and *`r myNA` missing values* for R2, the median value for the R2 is `r myMedian`. 
+
+## Data augmentation to reduce the number of missing R2
+
+Missing values are linked to the small sample. It is possible that the `r 100*myProp`% in the training sample do not have all the possible values that the testing sample has, and this generates an error.   
+
+```{r}
+for(i in 1:myIterations){
+
+set.seed(i)
+rf_test_pred_2 <- NA
+
+df_split <- initial_split(
+  # rbind(df_DFM_02,df_DFM_02,df_DFM_02)# Data Augmentation
+  rbind(df_DFM_02,df_DFM_02)# Data Augmentation
+  # df_DFM_02
+  , prop = myProp
+  # , strata=After
+  )
+df_train <- training(df_split)
+df_test <- testing(df_split)
+
+# Model fit with Tidymodels
+model_fit <- linear_reg() %>% 
+  set_engine("lm")%>%
+  fit(NPS ~ After+Age*During + nouveau + trop, data=df_train)
+
+# Prediction
+tryCatch(
+  {
+  rf_test_pred_2 <- 
+  predict(model_fit, df_test) %>% 
+  bind_cols(df_test %>% select(NPS))   # Add the true outcome data back in
+  }, error=function(e){}
+  )
+
+# ggplot(data = rf_test_pred_2,
+#        mapping = aes(x = .pred, y = NPS)) +
+#   geom_point(color = '#006EA1', alpha = 0.25) +
+#   geom_abline(intercept = 0, slope = 1, color = 'orange') +
+#   labs(title = paste('NPS for 100 CHF (R2=',round_any(rsq(rf_test_pred_2, NPS, .pred)$.estimate,.01),')'),
+#        x = 'Predicted NPS',
+#        y = 'Actual NPS')
+
+tryCatch(
+  {
+rsq2_avg[i] <- rsq(rf_test_pred_2, NPS, .pred)$.estimate
+  }, error=function(e){}
+  )
+
+
+}
+
+myR2 <- data.frame(R2=round_any(rsq2_avg,.05))%>%group_by(R2)%>%dplyr::summarise(Freq=n())
+
+
+myNA_02 <- sum(is.na(rsq2_avg))
+myMedian_02 <- round_any(median(rsq2_avg, na.rm = TRUE ),.01)
+```
+
+A possible solution is to duplicate the dataset and have `r dim(df_split)[3]` lines.
+
+```{r, fig.margin = TRUE}
+ggplot(myR2, aes(R2, Freq)) +     
+  geom_col(position = 'dodge')
+
+```
+
+After `r myIterations` iterations and *`r myNA_02`* missing values for R2, the median value for the R2 is `r myMedian_02`. 
+
+## Extreme data augmentation to reduce the number of missing R2
+
+Missing values are linked to the small sample. It is possible that the `r 100*myProp`% in the training sample do not have all the possible values that the testing sample has, and this generates an error.   
+
+
+```{r}
+for(i in 1:myIterations){
+
+set.seed(i)
+rf_test_pred_2 <- NA
+
+df_split <- initial_split(
+  rbind(df_DFM_02,df_DFM_02,df_DFM_02)# Data Augmentation Extreme
+  # rbind(df_DFM_02,df_DFM_02)# Data Augmentation
+  # df_DFM_02
+  , prop = myProp
+  # , strata=After
+  )
+df_train <- training(df_split)
+df_test <- testing(df_split)
+
+# Model fit with Tidymodels
+model_fit <- linear_reg() %>% 
+  set_engine("lm")%>%
+  fit(NPS ~ After+Age*During + nouveau + trop, data=df_train)
+
+# Prediction
+tryCatch(
+  {
+  rf_test_pred_2 <- 
+  predict(model_fit, df_test) %>% 
+  bind_cols(df_test %>% select(NPS))   # Add the true outcome data back in
+  }, error=function(e){}
+  )
+
+# ggplot(data = rf_test_pred_2,
+#        mapping = aes(x = .pred, y = NPS)) +
+#   geom_point(color = '#006EA1', alpha = 0.25) +
+#   geom_abline(intercept = 0, slope = 1, color = 'orange') +
+#   labs(title = paste('NPS for 100 CHF (R2=',round_any(rsq(rf_test_pred_2, NPS, .pred)$.estimate,.01),')'),
+#        x = 'Predicted NPS',
+#        y = 'Actual NPS')
+
+tryCatch(
+  {
+rsq2_avg[i] <- rsq(rf_test_pred_2, NPS, .pred)$.estimate
+  }, error=function(e){}
+  )
+
+
+}
+
+myR2 <- data.frame(R2=round_any(rsq2_avg,.05))%>%group_by(R2)%>%dplyr::summarise(Freq=n())
+
+
+myNA_03 <- sum(is.na(rsq2_avg))
+myMedian_03 <- round_any(median(rsq2_avg, na.rm = TRUE ),.01)
+
+```
+
+A possible solution is to duplicate the dataset and have `r dim(df_split)[3]` lines.
+
+```{r, fig.margin = TRUE}
+ggplot(myR2, aes(R2, Freq)) +     
+  geom_col(position = 'dodge')
+
+```
+
+After `r myIterations` iterations and *`r myNA_03`* missing values for R2, the median value for the R2 is `r myMedian_03`. 
+
+# Appendix: Collected data
+
+## Collected data (part 01)
+```{r Collected data}
+
+myLongText <- "7em"
+
+# Show only half of the dataset
+df[1:((dim(df)[1]/3)-1),]%>% 
+  select(-NPS_Fact)%>%
+  knitr::kable()%>%
+    column_spec(1, width = myLongText)%>%column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%
+  column_spec(4, width = "2em")%>%  column_spec(5, width = "2em")%>%
+  column_spec(6, width = "3em")%>%column_spec(7, width = "3em")%>%column_spec(8, width = "2em")
+
+```
+
+```{r}
+## Collected data (part 02)
+
+df[(dim(df)[1]/3):((2*dim(df)[1]/3)-1),]%>% 
+  select(-NPS_Fact)%>%
+  knitr::kable()%>%
+    column_spec(1, width = "1em")%>%
+    column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = myLongText)%>%
+    column_spec(7, width = "3em")%>%column_spec(8, width = "3em")%>%column_spec(9, width = "2em")
+
+```
+
+```{r}
+## Collected data (part 03)
+
+df[(2*dim(df)[1]/3):(dim(df)[1]),]%>% 
+  select(-NPS_Fact)%>%
+  knitr::kable()%>%
+    column_spec(1, width = "0.5em")%>%  
+    column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = myLongText)%>%
+    column_spec(7, width = "3em")%>%column_spec(8, width = "3em")%>%column_spec(9, width = "3em")
+```
+# Diagnostic of the linear regression
+
+## Looking for outliers
+
+The analysis of outliers shows that respondent 26 is an outlier (p=0.02).  
+Nonetheless, the data point is not removed since there is not a valid reason to do so.  
+If we would, the AdjR2 of Model 03 would be 0.97.  
+
+```{r Diagnostic}
+
+# Function for regression diagnostic
+# Source: https://stats.idre.ucla.edu/wp-content/uploads/2019/02/R_reg_part2.html#(1)
+
+myModel= myLM_DFM
+myDataset=df_DFM_02
+multipleVar=TRUE
+
+
+# Show Coefficients, p-values and Adj R2  
+# print(summary(myModel))
+```
+
+*Analysis of the residuals*
+```{r Analysis of the residuals}
+### Analysis of the residuals
+res.std <- rstandard(myModel) #studentized residuals stored in vector res.std 
+# plot Standardized residual in y axis. X axis will be the index or row names
+plot(res.std, ylab="Standardized Residual", ylim=c(-3.5,3.5))
+#add horizontal lines 3 and -3 to identify extreme values
+abline(h =c(-3,0,3), lty = 2)
+#find out which data point is outside of 3 standard deviation cut-off
+#index is row numbers of those point
+index <- which(res.std > 3 | res.std < -3)
+
+#add UID next to points that have extreme value
+if(length(index)>0){
+  text(index-20, res.std[index] , labels = myDataset$UID[index])
+  }
+print(index)
+```
+
+*Bonferroni p-value for testing outlier*
+```{r Bonferroni p-values}
+#Bonferroni p-values for testing outliner identifies another outlier, but p > 0.05
+myBonf <- outlierTest(myModel)
+
+```
+
+*Checking the leverage*
+```{r Checking the leverage}
+### Checking the leverage
+#a vector containing the diagonal of the 'hat' matrix
+h <- influence(myModel)$hat
+#half normal plot of leverage from package faraway
+halfnorm(influence(myModel)$hat, ylab = "leverage")
+#the cut of value for cook's distance
+cutoff <- 4/((nrow(myDataset)-length(myModel$coefficients)-2))
+plot(myModel, which = 4, cook.levels = cutoff)
+```
+
+*Checking the influence*
+```{r Checking the influence}
+### Checking the influence
+#cook's distance, studentized residuals, and leverage in the same plot
+influencePlot(myModel, main="Influence Plot", 
+              sub="Circle size is proportional to Cook's Distance" )
+```
+
+*diagnostic plots to identify influential points*
+```{r diagnostic plots}
+# 4 diagnostic plots to identify influential points
+tryCatch({
+  infIndexPlot(myModel)
+  },
+  error=function(e){}
+  )
+```
+
+## Aanylsis of the residuals
+
+*Checking homoscedasticity*
+```{r Checking homoscedasticity,fig.margin = TRUE}
+### Checking homoscedasticity
+#residual vs. fitted value plot for Homoscedasticity
+plot(myModel$resid ~ myModel$fitted.values, main="Checking for Homoskedasticity")
+#add horizental line from 0
+abline(h = 0, lty = 2)
+```
+
+*Checking linearity*
+```{r Checking linearity, fig.fullwidth = TRUE}
+# make labels and margins smaller
+par(cex=1.5, mai=c(0.1,0.1,0.1,0.1))
+
+###Checking linearity
+#residual vs. fitted value and all predictors plus test for curvature
+
+tryCatch({
+residualPlots(myModel)
+  },
+  error=function(e){}
+  )
+```
+
+```{r Checking Issues of Independence }
+# Checking Issues of Independence 
+# Here there is no temporal data
+```
+
+
+```{r Checking Normality of residuals, fig.margin = TRUE}
+### Checking Normality of residuals
+qqnorm(myModel$resid)  #Normal Quantile to Quantile plot
+qqline(myModel$resid)
+```
+
+*VIF*
+```{r VIF,fig.fullwidth = TRUE}
+###VIF, variance inflation factor, is used to measure the degree of multicollinearity.
+if(multipleVar)
+  tryCatch(
+  {
+    car::vif(myModel)
+  },
+  error=function(e){}
+)
+```
+
+
+```{r Check Omitted Variables}
+# Check Omitted Variables
+# avPlots(myModel)
+```
+
