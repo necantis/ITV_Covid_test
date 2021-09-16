@@ -1,0 +1,8 @@
+\usepackage{lscape}
+
+\newcommand{\blandscape}{
+  \begin{landscape}
+  \pagebreak[4]\global\pdfpageattr\expandafter{\the\pdfpageattr/Rotate 90}}
+\newcommand{\elandscape}{
+  \end{landscape}
+  \pagebreak[4]\global\pdfpageattr\expandafter{\the\pdfpageattr/Rotate 0}}

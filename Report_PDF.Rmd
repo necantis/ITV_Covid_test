@@ -1,5 +1,5 @@
 ---
-title: "Data report: Customer discovery for a new Covid test"
+title: "Report: Customer discovery for new Covid tests"
 output: 
   tufte::tufte_handout: 
   includes:
@@ -22,17 +22,17 @@ library(plyr) ## Round_any
 
 ### 3. Transformation
 library(quanteda) # Text mining
-library(tidymodels)
+library(tidymodels) # For linear regressions
 
 ### 4. Data mining
 
-library(stm)
+library(stm) # Topic modeling
 # STM has a problem with RCPP that needs to be solved every time
 # https://stackoverflow.com/questions/68416435/rcpp-package-doesnt-include-rcpp-precious-remove
 # install.packages('Rcpp')
 library(Rcpp) # 
 
-library(infer)
+# library(infer)
 
 ## Diagnostic RL
 # https://stats.idre.ucla.edu/wp-content/uploads/2019/02/R_reg_part2.html#(3)
@@ -41,11 +41,16 @@ library(alr3)
 library(faraway)
 
 
-
 ## Interpretation of random forest rules
 # https://stackoverflow.com/questions/14996619/random-forest-output-interpretation
-library(inTrees)
-library(randomForest)
+# library(inTrees)
+# library(randomForest)
+
+
+## Parallel processing
+library(furrr) # For leave one out (https://furrr.futureverse.org/)
+library(tictoc) ## Assessing code performance
+
 
 
 # library(h2o) #Does not work with ShinyApps
@@ -85,7 +90,50 @@ options(knitr.table.format = function() {
 
 ```
 
-# Collected data
+# Executive report
+```{r, fig.margin = TRUE}
+knitr::include_graphics('img/covid_test.jpg')
+```
+
+
+```{marginfigure, echo= TRUE}
+## Overall problem to be adressed
+Currently, there is not an ideal diagnostic test available to massively screen symptomatic and asymptomatic patients.
+
+-	RT-PCR is the gold standard used for medical diagnosis for symptomatic people or in hospitals but the technology requires significant expertise. 
+-	Rapid antigenic tests are available but are limited to symptomatic patients with high viral load. 
+Therefore, there is an opportunity for a non-antigenic test, which is amenable to massively screen symptomatic and asymptomatic patients infected by the original Wuhan or emerging variant strains. 
+```
+
+`r tufte::newthought("The scientific objective")` of our non-antigenic diagnostic approach is to _regioselectively_ label the SARS-CoV-2 spike protein with an imaging cargo to detect infected patients. 
+From the business point of view, our solution should increase the population target of antigenic tests. Such population is currently limited to these patients who are experiencing COVID-19 symptoms within four days. With our method, more people will be able to be tested. 
+
+```{marginfigure, echo= TRUE}
+## Method used in this report
+  
+In this project, we wish to assess the desirability of the product by collecting data with potential users and customers. 
+
+The desirability of the product has been assessed by the Institute of Entrepreneurship and Management, under the guidance of Prof. Riccardo Bonazzi. The following points were investigated, by using the Value Proposition Canvas:
+
+  -	Profile of the customer segment: demographic and psychographic features (the job-to-be-done, the pains/gains that the customer experience with the existing services)  
+-	Features of the proposed service: pain reliever and gain generators   
+-	Problem-solution fit: willingness to pay and net promoter score   
+```
+
+## Preliminary results about the desirability of the new service
+
+We have collected data from 33 private consumers, which could acquire the test for themselves.
+(Out of scope: 2 private firms, which could acquire the test for their employees). 
+This 10-page report describes the result of an A/B test, to analyze how the willingness to pay of the two customer segments varies depending on the features of the test.   
+
+(1) *Profile of the customer segment*: As shown in _"Section 02: a model to identify the best customer segment"_, the new test is best addressed to clients aged between 40 and 60 years.   
+(1) *Features of the proposed service*: As shown in _"Section 03: an improved model to identify the jobs to be done"_, the novelty of the test seems to appeal to a part of the clients, which are willing to pay more for that. The product should not be positioned as cheaper than the PCR, because cost-sensitive clients are not willing to pay 100 CHF for any sort of test.   
+(1) *Problem-solution fit*: as shown in _"section 01: general information about the collected data"_, there is a significant percentage of potential clients who would pay 100 CHF for the new test and recommend it to a friend/colleague. Nonetheless, while collecting data we observed large shifts in responses depending on the recent news. Hence, we would advise to repeat the data collection again once the situation will be stabilized.   
+
+\newpage
+
+
+# Section 01: general information about the collected data
 
 ```{r data collection, include=FALSE}
 # Gettings the answers
@@ -215,7 +263,7 @@ NetPromoterScore <- PromoterScore - DetractorScore
 ```
 
 
-## Willigness to pay and promoter score
+## Willigness to pay and likelihood to recommend
 
 ```{marginfigure, echo= TRUE}
 Want to know more about Willigness to pay ? _Hanemann, W. M. (1991). Willingness to pay and willingness to accept: how much can they differ?. The American Economic Review, 81(3), 635-647._[link](https://www.jstor.org/stable/pdf/2006525.pdf?casa_token=tszYCgmKp7MAAAAA:j7XZHp5GXyIARr33dHKCfAVGKXG5JoEYE6rXsE-6R1CSoDW1_VncOLqvGaZ-pew6u4G6p-UyOGnW_aOE6-lmaLLmt-17gVIgtzTm7g9KLPVW3mdZ_lPMww)
@@ -246,14 +294,14 @@ par(fig=c(0.6,1,0,1), new=TRUE)
 hist(Prix_Max,main="Max Price (WTP)", xlim=c(0,250), ylim=c(0,25))
 ```
 
-In the end, we are interested in how many respondent are willing to pay 100 CHF for the new test, and they are going to recommend it to other users. The third image shows the distribution of the likelihood that respondent will recommend the service, also know as _Net Promoter Score (NPS)_.  The *Promoters* (NPS>8) represent `r PromoterCount` of the total and the *Detractors* (NPS<7) represent `r DetractorCount` of the total; hence, the _NPS_ is: `r PromoterScore`% - `r DetractorScore`% = `r PromoterScore - DetractorScore`%.
+In the end, we are interested in how many respondent are willing to pay 100 CHF for the new test, and they are more likely to recommend it to other users. The third image shows the distribution of the likelihood that respondent will recommend the service, also know as _Net Promoter Score (NPS)_.  The *Promoters* (likelihood to recommend>8) represent `r PromoterCount` of the total and the *Detractors* (likelihood to recommend<7) represent `r DetractorCount` of the total; hence, the _NPS_ is: `r PromoterScore`% - `r DetractorScore`% = `r PromoterScore - DetractorScore`%.
 
 ```{marginfigure, echo= TRUE}
 Want to know more about the NPS approach ? _Reichheld, F. F. (2003). The one number you need to grow. Harvard business review, 81(12), 46-55_[link](https://hbr.org/2003/12/the-one-number-you-need-to-grow)
 ```
 
 ```{r NPS Barplot Side, fig.margin = TRUE}
-hist(Promoter_Score,main="NPS for  CHF 100")
+hist(Promoter_Score,main="Likelihood to recommend (price=CHF 100)")
 ```
 
 ```{r NPS WTP MaxPrice Age, eval=FALSE}
@@ -294,7 +342,7 @@ We are currently looking for customers
 
 * that are willing to pay at least 100 CHF( _Customer lifetime value_ ) 
 
-* that have an estimated probability to recommend our product of at least 7/10 ( _Customer referral value_ )
+* that have an likelihood to recommend our product of at least 7/10 ( _Customer referral value_ )
 
 We have conducted empirical surveys in two steps: (1) in the first step, we have assessed what is the solution currently used and which are the features, which the respondent considers important for the perfect solution; (2) in the second step, we have performed conjoint analysis, showing to the respondent an alternative and assessing the change in WTP.
 
@@ -329,27 +377,16 @@ myChampionRatio <- round_any(100*dim(myChampionsList)[1]/dim(myChampions)[1],0.1
 
 After 2 rounds of interviews, we had `r dim(myChampionsList)[1]` champions over a total of `r dim(myChampions)[1]` respondents (=`r myChampionRatio`%).
 
-In the following sections, we shall try to predict how to obtain a customer willing to pay 100 CHF and we will use the net promoter score (NPS) as dependent variable.
+In the following sections, we shall try to predict how to obtain a customer willing to pay 100 CHF and we will use the likelihood to recommend the product as dependent variable.
 
 
 \newpage
 
-# Effect of the customer journey on the NPS associated with 100 CHF
-
-The "forest plot” shows the value of the coefficients of the linear regression analysis and their 95% confidence interval.  
-
+# Section 02: a model to identify the best customer segment
 ```{marginfigure, echo= TRUE}
 Want to know more about testing WTP? _Breidert, C., Hahsler, M., & Reutterer, T. (2006). A review of methods for measuring willingness-to-pay. Innovative marketing, 2(4), 8-32._[link](http://www.reutterer.com/papers/breidert&hahsler&reutterer_2006.pdf)
 ```
-
-Model 01 takes into account: 
-(A) if the respondent thinks that the new solution improve the three steps of the customer journey (before the service, during the service and after the service);
-(B) the age of the respondent;
-(C) if the respondent is vaccinated.   
-
-Model 02 is more parsimonious, and it takes into account: 
-(A) two steps of the customer journey: during the test and after the test,
-(B) the age of the respondent
+In this section, we assess the effect of the perceived customer journey on the likelihood to recommend associated with 100 CHF. The "forest plot” shows the value of the coefficients of the linear regression analysis and their 95% confidence interval.  
 
 ```{marginfigure, echo= TRUE}
 Each variable about the customer journey is categorical, meaning that it can have one of five possible values:
@@ -360,7 +397,8 @@ Each variable about the customer journey is categorical, meaning that it can hav
 (IV) the new service is a little bit worse than the current one,  
 (V) the new service is a worse than the current one.
 ```
-
+Model 01 takes into account: (A) if the respondent thinks that the new solution improve the three steps of the customer journey (before the service, during the service and after the service); (B) the age of the respondent; (C) if the respondent is vaccinated.   
+Model 02 is more parsimonious, and it takes into account: (A) two steps of the customer journey: during the test and after the test, (B) the age of the respondent.
 Finally, both models analyze the interaction between the score of the During phase and the age, to see if people answered differently according to the age.
 
 ```{r Creating Df}
@@ -457,7 +495,7 @@ df_simple <- df%>%
     geom_vline(xintercept = 0,
                colour = "grey60",
                linetype = 2) +
-    ggtitle("Predicting NPS") +
+    ggtitle("Predicting likelihood to recommend") +
     theme(
         plot.title = element_text(face = "bold"),
         legend.position = c(0.01, 0.01),
@@ -469,19 +507,14 @@ df_simple <- df%>%
 ```
 
 
-Model 02 shows that Age plays an important role in the NPS: 
-
-(1) respondents _aged >40_ have the tendency to give a positive NPS.  
-(2) respondents aged between 41 and 50 years old that the _Testing phase_ is fairly better will give a smaller NPS.
-
+Model 02 shows that Age plays an important role in the likelihood to recommend: (1) respondents _aged >40_ have the tendency to give a higher likelihood to recommend. (2) young respondents (between 21 and 30 yrs) might like the _Testing phase_ while being Detractors.
 ```{marginfigure, echo= TRUE}
 Due to the small amount of data collected, most of the 95% confidence intervals do not allow to assess if the coefficients have a positive/negative effect.
 
 Want to know more about Adjusted R2? [link](https://en.wikipedia.org/wiki/Coefficient_of_determination#Adjusted_R2)
 ```
-  
-Model 01 has many variables and its Adjusted R2 is `r round_any((myLM_base%>%glance())$adj.r.squared,.01)`.
-Model 02 is more parsimonious and its Adjusted R2 is `r round_any((myLM%>%glance())$adj.r.squared,.01)`. 
+Model 01 has many variables; its Adjusted R2 is `r round_any((myLM_base%>%glance())$adj.r.squared,.01)`.
+The Adjusted R2 of Model 02 is `r round_any((myLM%>%glance())$adj.r.squared,.01)`. 
 
 \newpage
 
@@ -574,11 +607,9 @@ A word cloud represents the most used keywords, which have been processed to be 
 Want to know more about the process? [link](https://en.wikipedia.org/wiki/Text_mining#Text_analysis_processes)
 ```
 
-The comments concerning net promoter score are known to be very useful to understand the underlying reasons of the participants.   
+The comments concerning the likelihood to promote are known to be very useful to understand the underlying reasons of the participants.   
 
 The polarized word cloud allows to identify the keywords that are specific to each type of participant.
-
-The second wordcloud shows the keywords that are specific the promoter group.
 
 ```{r Wordcloud}
 # https://quanteda.io/reference/textplot_wordcloud.html
@@ -596,10 +627,14 @@ par(cex=.9, mai=c(0,0,0.1,0.1))
 
 set.seed(5)
 # define area for the Max price
-par(fig=c(0,0.7,0,1))
+# par(fig=c(0,0.7,0,1))
 myCloud%>%textplot_wordcloud(comparison = TRUE, max_words = 300)
+```
 
-par(fig=c(0.7,1,0,1), new=TRUE)
+
+```{r Wordcloud 02, fig.margin = TRUE, eval=FALSE}
+# The second wordcloud shows the keywords that are specific the promoter group.
+# par(fig=c(0.7,1,0,1), new=TRUE)
 myCloud%>% textstat_keyness(target = "Promoter")%>%textplot_wordcloud()
 
 ```
@@ -736,7 +771,9 @@ df_DFM <- cbind(
 
 \newpage
 
-## Improved linear regression by using relevant keywords
+# Section 03: an improved model to identify the jobs to be done
+
+## A linear regression that uses relevant keywords
 
 ```{r}
 
@@ -772,7 +809,7 @@ Want to know more about mixed methodology that combined qualitative surveys and 
 ```
 
 The new linear regression analysis confirms the trends of the previous models, with a more precise confidence interval.
-The two words are clearly associated to a positive and negative effect on the NPS, suggesting a brand strategy to adress the Champions.
+The two words are clearly associated to a positive and negative effect on the likelihood to recommend, suggesting a brand strategy to adress the Champions.
 Although the model has many variables its explanatory power is fairly good: the Adjusted R2 of the model is `r round_any((myLM_DFM%>%glance())$adj.r.squared,.01)`.
 
 ```{r Model 03, fig.fullwidth = TRUE}
@@ -797,7 +834,7 @@ Although the model has many variables its explanatory power is fairly good: the 
     geom_vline(xintercept = 0,
                colour = "grey60",
                linetype = 2) +
-    ggtitle("Predicting NPS") +
+    ggtitle("Predicting likelihood to recommend") +
     theme(
         plot.title = element_text(face = "bold"),
         legend.position = c(0.01, 0.01),
@@ -828,7 +865,8 @@ myLR_Scores_raw <- rbind(
 myLR_Scores <- cbind(Model=c("M1","M2","M3"),myLR_Scores_raw)
 
 myLR_Scores[,1:6]%>%
-  knitr::kable()
+  knitr::kable()%>%
+  column_spec(1, width = "2em")%>%column_spec(6, width = "2em")
 ```
 
 
@@ -863,253 +901,262 @@ Model 02 removed variables that were not needed, such as Vaccine and Before. Hen
 ```
 \newpage
 
-## Predictions on the overall dataset - Part 01
-```{r Predictions on dataset}
-
-myLM_DFM_aug <- augment(myLM_DFM)
-
-myLM_DFM_aug_df <- cbind(myLM_DFM_aug%>%select(During,After,Age,nouveau,trop,
-         NPS),
-         fitted=round_any(myLM_DFM_aug$.fitted,.01),
-         resid=round_any(myLM_DFM_aug$.resid,.01)
-        )%>%
-  arrange(desc(resid))
-
-myLongText <- "10em"
-
-myLM_DFM_aug_df[1:(dim(df)[1]/3),]%>%
-  knitr::kable()%>%
-column_spec(1, width = myLongText)%>%column_spec(2, width = myLongText)%>%column_spec(3, width = "4em")
-
-```
-
-## Predictions on the overall dataset - Part 02
-```{r}
-myLM_DFM_aug_df[(dim(df)[1]/3):(2*dim(df)[1]/3),]%>%
-  knitr::kable()%>%
-column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = "4em")
-
-```
-
-## Predictions on the overall dataset - Part 03
-```{r}
-myLM_DFM_aug_df[(2*dim(df)[1]/3):(dim(df)[1]),]%>%
-  knitr::kable()%>%
-column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = "4em")
-
-```
-\newpage
-
 # Does it really work ? More testing Model 03
 
-```{r Parameters iterations}
-myIterations <- 100
-rsq2_avg <- rep(NA,myIterations)
-myProp <- 0.7
-```
+```{r Leave one out Cross validation, include=FALSE}
 
-Predicting all values used to train the model is not very complicated.   
-Hence, we trained the model with `r 100*myProp`% of the data and testing it with the remaining data.  
-We perform `r myIterations` iterations with different seeds, and we show here the results.  
-
-```{r Training and Testing}
-for(i in 1:myIterations){
-
-set.seed(i)
-rf_test_pred_2 <- NA
-
-df_split <- initial_split(
-  # rbind(df_DFM_02,df_DFM_02,df_DFM_02)# Data Augmentation
-  df_DFM_02
-  , prop = myProp
-  # , strata=After
-  )
-df_train <- training(df_split)
-df_test <- testing(df_split)
-
-# Model fit with Tidymodels
-model_fit <- linear_reg() %>% 
-  set_engine("lm")%>%
-  fit(NPS ~ After+Age*During + nouveau + trop, data=df_train)
-
-# Prediction
-tryCatch(
-  {
-  rf_test_pred_2 <- 
-  predict(model_fit, df_test) %>% 
-  bind_cols(df_test %>% select(NPS))   # Add the true outcome data back in
-  }, error=function(e){}
-  )
-
-# ggplot(data = rf_test_pred_2,
-#        mapping = aes(x = .pred, y = NPS)) +
-#   geom_point(color = '#006EA1', alpha = 0.25) +
-#   geom_abline(intercept = 0, slope = 1, color = 'orange') +
-#   labs(title = paste('NPS for 100 CHF (R2=',round_any(rsq(rf_test_pred_2, NPS, .pred)$.estimate,.01),')'),
-#        x = 'Predicted NPS',
-#        y = 'Actual NPS')
-
-tryCatch(
-  {
-rsq2_avg[i] <- rsq(rf_test_pred_2, NPS, .pred)$.estimate
-  }, error=function(e){}
-  )
+### Testing with Leave one out
+# https://bookdown.org/aurora_tumminello/statistics_lab/leave-one-out-cross-validation.html
 
 
+# df_DFM_02b <- df_DFM_02[-25,] # Remove outlier
+df_DFM_02b <- df_DFM_02
+n <- nrow(df_DFM_02b)
+# placeholder for storing the i-th prediction
+preds <- rep(NA, n)
+
+tic() # Assessing performance of the code
+
+for(i in 1:n) {
+    dataf.train <- df_DFM_02b[-i, ]
+    dataf.test <- df_DFM_02b[i, ]
+    lm.fit <- lm(NPS ~ After+Age*During + nouveau + trop, data=dataf.train)
+    try(preds[i] <- predict(lm.fit, dataf.test))
 }
 
-myR2 <- data.frame(R2=round_any(rsq2_avg,.05))%>%group_by(R2)%>%dplyr::summarise(Freq=n())
-
-myNA <- sum(is.na(rsq2_avg))
-myMedian <- round_any(median(rsq2_avg, na.rm = TRUE ),.01)
-```
+toc() # Assessing performance of the code
 
 
-```{r, fig.margin = TRUE}
-ggplot(myR2, aes(R2, Freq)) +     
-  geom_col(position = 'dodge')
+myR2 <- round_any(rsq(df_DFM_02b, NPS, preds)$.estimate,.001)
+myNA <- sum(is.na(preds))
+
 
 ```
 
-After `r myIterations` iterations and *`r myNA` missing values* for R2, the median value for the R2 is `r myMedian`. 
+```{r, eval=FALSE}
+### PARALLEL COMPUTING
+# https://www.tidymodels.org/learn/work/nested-resampling/
+# https://www.futureverse.org/
+# https://furrr.futureverse.org/reference/future_map2.html
 
-## Data augmentation to reduce the number of missing R2
+library(future)
+library(foreach)
+doFuture::registerDoFuture()
 
-Missing values are linked to the small sample. It is possible that the `r 100*myProp`% in the training sample do not have all the possible values that the testing sample has, and this generates an error.   
-
-```{r}
-for(i in 1:myIterations){
-
-set.seed(i)
-rf_test_pred_2 <- NA
-
-df_split <- initial_split(
-  # rbind(df_DFM_02,df_DFM_02,df_DFM_02)# Data Augmentation
-  rbind(df_DFM_02,df_DFM_02)# Data Augmentation
-  # df_DFM_02
-  , prop = myProp
-  # , strata=After
-  )
-df_train <- training(df_split)
-df_test <- testing(df_split)
-
-# Model fit with Tidymodels
-model_fit <- linear_reg() %>% 
-  set_engine("lm")%>%
-  fit(NPS ~ After+Age*During + nouveau + trop, data=df_train)
-
-# Prediction
-tryCatch(
-  {
-  rf_test_pred_2 <- 
-  predict(model_fit, df_test) %>% 
-  bind_cols(df_test %>% select(NPS))   # Add the true outcome data back in
-  }, error=function(e){}
-  )
-
-# ggplot(data = rf_test_pred_2,
-#        mapping = aes(x = .pred, y = NPS)) +
-#   geom_point(color = '#006EA1', alpha = 0.25) +
-#   geom_abline(intercept = 0, slope = 1, color = 'orange') +
-#   labs(title = paste('NPS for 100 CHF (R2=',round_any(rsq(rf_test_pred_2, NPS, .pred)$.estimate,.01),')'),
-#        x = 'Predicted NPS',
-#        y = 'Actual NPS')
-
-tryCatch(
-  {
-rsq2_avg[i] <- rsq(rf_test_pred_2, NPS, .pred)$.estimate
-  }, error=function(e){}
-  )
+plan(multisession, workers = availableCores())
+plan(sequential)
 
 
+
+df_DFM_02b <-loo_cv(df_DFM_02)$splits # https://rsample.tidymodels.org/reference/loo_cv.html
+
+tic()
+y <-
+  foreach(i = as.integer(1:length(df_DFM_02b))) %dopar% {
+  # foreach(i = as.integer(1:n)) %do% {    
+     myPred <- NA
+    # dataf.train <- analysis(df_DFM_02b$splits[[i]])
+    # dataf.test <- assessment(df_DFM_02b$splits[[i]])
+    # lm.fit <- lm(NPS ~ After+Age*During + nouveau + trop, data=analysis(df_DFM_02b$splits[[i]]))
+    # try(preds[i] <- predict(lm.fit, dataf.test))
+    tryCatch({
+      myPred <- predict(lm(NPS ~ After+Age*During + nouveau + trop, data=analysis(df_DFM_02b[[i]]))
+                        , assessment(df_DFM_02b[[i]]))
+    },error=function(e){})
+    myPred
 }
+toc()
 
-myR2 <- data.frame(R2=round_any(rsq2_avg,.05))%>%group_by(R2)%>%dplyr::summarise(Freq=n())
 
 
-myNA_02 <- sum(is.na(rsq2_avg))
-myMedian_02 <- round_any(median(rsq2_avg, na.rm = TRUE ),.01)
-```
+# myR2 <- round_any(rsq(df_DFM_02b, NPS, preds)$.estimate,.001)
+myR2 <- round_any(rsq(df_DFM_02b, NPS, ldply(y, data.frame)[,1])$.estimate,.001)
+myNA <- sum(is.na(preds))
 
-A possible solution is to duplicate the dataset and have `r dim(df_split)[3]` lines.
 
-```{r, fig.margin = TRUE}
-ggplot(myR2, aes(R2, Freq)) +     
-  geom_col(position = 'dodge')
+
 
 ```
 
-After `r myIterations` iterations and *`r myNA_02`* missing values for R2, the median value for the R2 is `r myMedian_02`. 
 
-## Extreme data augmentation to reduce the number of missing R2
+```{marginfigure, echo=TRUE}
+Do you want to know more about Leave-one-out cross-validation? [link](https://en.wikipedia.org/wiki/Cross-validation_(statistics)#Leave-one-out_cross-validation)
+```
+Predicting all values used to train the model is not very complicated, because the system trains itself with all the values that it has to predict afterwards.   
+```{r barplot crossvalidation,fig.margin = TRUE}
+myError <- df_DFM_02b$NPS-preds
+myError2 <- round_any(myError*myError,.1)
 
-Missing values are linked to the small sample. It is possible that the `r 100*myProp`% in the training sample do not have all the possible values that the testing sample has, and this generates an error.   
+barplot(prop.table(table(myError2)), main= "Distribution of errors during cross-validation")
+
+```
+Hence, we use the Leave-one-out (LOO) cross-validation approach, which uses one data point in the original set as the assessment data and all other data points as the analysis set.  
+
+We perform `r n` iterations, and we show here the results. Some data points were wrongly predicted, and some data points could not be predicted, because they had some values, which were not in the testing dataset.   
+```{r Diagnostic}
+# Function for regression diagnostic
+# Source: https://stats.idre.ucla.edu/wp-content/uploads/2019/02/R_reg_part2.html#(1)
+
+myModel= myLM_DFM
+myDataset=df_DFM_02
+multipleVar=TRUE
+
+# Show Coefficients, p-values and Adj R2  
+# print(summary(myModel))
+```
+
+```{r Checking homoscedasticity,fig.margin = TRUE}
+### Checking homoscedasticity
+#residual vs. fitted value plot for Homoscedasticity
+plot(myModel$resid ~ myModel$fitted.values, main="Checking for Homoskedasticity")
+#add horizental line from 0
+abline(h = 0, lty = 2)
+```
+After `r n` iterations and *`r myNA` missing predictions*, the R2 obtained from the predictions and the real values is `r myR2`. 
 
 
-```{r}
-for(i in 1:myIterations){
 
-set.seed(i)
-rf_test_pred_2 <- NA
 
-df_split <- initial_split(
-  rbind(df_DFM_02,df_DFM_02,df_DFM_02)# Data Augmentation Extreme
-  # rbind(df_DFM_02,df_DFM_02)# Data Augmentation
-  # df_DFM_02
-  , prop = myProp
-  # , strata=After
+
+```{r Cook distance,fig.margin = TRUE, eval=FALSE}
+#the cut of value for cook's distance
+cutoff <- 4/((nrow(myDataset)-length(myModel$coefficients)-2))
+plot(myModel, which = 4, cook.levels = cutoff)
+```
+
+
+```{r Checking the influence,fig.margin = TRUE, include=FALSE, eval=FALSE}
+### Checking the influence
+#cook's distance, studentized residuals, and leverage in the same plot
+influencePlot(myModel, main="Influence Plot", 
+              sub="Circle size is proportional to Cook's Distance" )
+```
+
+
+```{r Analysis of the residuals, eval=FALSE}
+### Analysis of the residuals
+res.std <- rstandard(myModel) #studentized residuals stored in vector res.std 
+# plot Standardized residual in y axis. X axis will be the index or row names
+plot(res.std, ylab="Standardized Residual", ylim=c(-3.5,3.5))
+#add horizontal lines 3 and -3 to identify extreme values
+abline(h =c(-3,0,3), lty = 2)
+#find out which data point is outside of 3 standard deviation cut-off
+#index is row numbers of those point
+index <- which(res.std > 3 | res.std < -3)
+
+#add UID next to points that have extreme value
+if(length(index)>0){
+  text(index-20, res.std[index] , labels = myDataset$UID[index])
+  }
+print(index)
+```
+
+```{r Checking the leverage, eval = FALSE}
+### Checking the leverage
+#a vector containing the diagonal of the 'hat' matrix
+h <- influence(myModel)$hat
+#half normal plot of leverage from package faraway
+halfnorm(influence(myModel)$hat, ylab = "leverage")
+```
+
+```{r diagnostic plots, eval=FALSE}
+# 4 diagnostic plots to identify influential points
+tryCatch({
+  infIndexPlot(myModel)
+  },
+  error=function(e){}
   )
-df_train <- training(df_split)
-df_test <- testing(df_split)
+```
 
-# Model fit with Tidymodels
-model_fit <- linear_reg() %>% 
-  set_engine("lm")%>%
-  fit(NPS ~ After+Age*During + nouveau + trop, data=df_train)
+## Diagnostic of the linear regression: Anaylsis of the residuals 
 
-# Prediction
-tryCatch(
-  {
-  rf_test_pred_2 <- 
-  predict(model_fit, df_test) %>% 
-  bind_cols(df_test %>% select(NPS))   # Add the true outcome data back in
-  }, error=function(e){}
+The analysis of the residuals does not show any relevant issues. 
+
+```{r Checking linearity Side, fig.margin = TRUE}
+# par(mar=c(1,1,1,1))
+
+#residual vs. fitted value and all predictors plus test for curvature
+
+###Checking linearity: ResidualPlots THIS DOES NOT APPEAR BECAUSE THE FIGURE IS TOO BIG
+### Solution: use Plot.lm
+# https://stat.ethz.ch/R-manual/R-devel/library/stats/html/plot.lm.html
+
+tryCatch({
+  # par(mar=c(1,1,1,1))
+  #   par(mfrow = c(2, 2))
+  plot(myModel, which = 2:5)
+  },
+  error=function(e){
+
+    }
+  )
+```
+
+* Homogeneity of variance: The error variance seems constant in the model.
+* Normality: the residuals are normally distributed and the hypotheses testing is reliable 
+* Linearity: the relationships predictors and likelihood to recommend is linear
+
+```{r Checking linearity with residualPlots, fig.margin = TRUE}
+
+#residual vs. fitted value and all predictors plus test for curvature
+
+###Checking linearity: The overall set of ResidualPlots is too big and generates an error
+### Solution 1: Select only one plot with the parameter terms
+## Source: (https://search.r-project.org/CRAN/refmans/car/html/residualPlots.html)
+
+### Solution 2: use Plot.lm
+# https://stat.ethz.ch/R-manual/R-devel/library/stats/html/plot.lm.html
+## Solution 3: Change size of the margins
+#https://stackoverflow.com/questions/23050928/error-in-plot-new-figure-margins-too-large-scatter-plot
+
+
+
+tryCatch({
+
+  # par(mar=c(1,1,1,1))
+
+    # par(mfrow = c(3, 2))
+    # residualPlots(myModel,terms = ~ After, tests=FALSE, fitted=FALSE)
+      # residualPlots(myModel,terms = ~ Age, tests=FALSE, fitted=FALSE)
+      # residualPlots(myModel,terms = ~ During, tests=FALSE, fitted=FALSE)
+      # residualPlots(myModel,terms = ~ nouveau, tests=FALSE, fitted=FALSE)
+      residualPlots(myModel,
+                    tests=FALSE, # remove text part          
+                    fitted= TRUE, # SHow the line with fitted values
+                    terms = ~ 1 # Select fitted graph by variable 1 
+                    ) 
+
+  },
+  error=function(e){
+
+    }
   )
 
-# ggplot(data = rf_test_pred_2,
-#        mapping = aes(x = .pred, y = NPS)) +
-#   geom_point(color = '#006EA1', alpha = 0.25) +
-#   geom_abline(intercept = 0, slope = 1, color = 'orange') +
-#   labs(title = paste('NPS for 100 CHF (R2=',round_any(rsq(rf_test_pred_2, NPS, .pred)$.estimate,.01),')'),
-#        x = 'Predicted NPS',
-#        y = 'Actual NPS')
-
-tryCatch(
-  {
-rsq2_avg[i] <- rsq(rf_test_pred_2, NPS, .pred)$.estimate
-  }, error=function(e){}
-  )
-
-
-}
-
-myR2 <- data.frame(R2=round_any(rsq2_avg,.05))%>%group_by(R2)%>%dplyr::summarise(Freq=n())
-
-
-myNA_03 <- sum(is.na(rsq2_avg))
-myMedian_03 <- round_any(median(rsq2_avg, na.rm = TRUE ),.01)
 
 ```
 
-A possible solution is to duplicate the dataset and have `r dim(df_split)[3]` lines.
+## Diagnostic of the linear regression: Looking for outliers
 
-```{r, fig.margin = TRUE}
-ggplot(myR2, aes(R2, Freq)) +     
-  geom_col(position = 'dodge')
+The analysis of outliers shows that one respondent is an outlier. Nonetheless, the data point is not removed since there is not a valid reason to do so.  If we would, the AdjR2 of Model 03 would be 0.97, and the cross-validation result would be more than 0.5.  
+   
+```{r Bonferroni p-values}
+#Bonferroni p-values for testing outliner identifies another outlier, but p > 0.05
+myBonf <- outlierTest(myModel)
 
+data.frame("P-value"= round_any(myBonf$p,.001))%>%knitr::kable()
 ```
 
-After `r myIterations` iterations and *`r myNA_03`* missing values for R2, the median value for the R2 is `r myMedian_03`. 
+```{r Checking Normality of residuals, fig.margin = TRUE, eval=FALSE}
+### Checking Normality of residuals
+qqnorm(myModel$resid)  #Normal Quantile to Quantile plot
+qqline(myModel$resid)
+```
+
+
+
+
+
+
 
 # Appendix: Collected data
 
@@ -1150,137 +1197,42 @@ df[(2*dim(df)[1]/3):(dim(df)[1]),]%>%
     column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = myLongText)%>%
     column_spec(7, width = "3em")%>%column_spec(8, width = "3em")%>%column_spec(9, width = "3em")
 ```
-# Diagnostic of the linear regression
 
-## Looking for outliers
+\newpage
 
-The analysis of outliers shows that respondent 26 is an outlier (p=0.02).  
-Nonetheless, the data point is not removed since there is not a valid reason to do so.  
-If we would, the AdjR2 of Model 03 would be 0.97.  
+# Appendix:Predictions on the overall dataset 
+## Part 01
+```{r Predictions on dataset}
 
-```{r Diagnostic}
+myLM_DFM_aug <- augment(myLM_DFM)
 
-# Function for regression diagnostic
-# Source: https://stats.idre.ucla.edu/wp-content/uploads/2019/02/R_reg_part2.html#(1)
+myLM_DFM_aug_df <- cbind(myLM_DFM_aug%>%select(During,After,Age,nouveau,trop,
+         NPS),
+         fitted=round_any(myLM_DFM_aug$.fitted,.01),
+         resid=round_any(myLM_DFM_aug$.resid,.01)
+        )%>%
+  arrange(desc(resid))
 
-myModel= myLM_DFM
-myDataset=df_DFM_02
-multipleVar=TRUE
+myLongText <- "10em"
 
-
-# Show Coefficients, p-values and Adj R2  
-# print(summary(myModel))
-```
-
-*Analysis of the residuals*
-```{r Analysis of the residuals}
-### Analysis of the residuals
-res.std <- rstandard(myModel) #studentized residuals stored in vector res.std 
-# plot Standardized residual in y axis. X axis will be the index or row names
-plot(res.std, ylab="Standardized Residual", ylim=c(-3.5,3.5))
-#add horizontal lines 3 and -3 to identify extreme values
-abline(h =c(-3,0,3), lty = 2)
-#find out which data point is outside of 3 standard deviation cut-off
-#index is row numbers of those point
-index <- which(res.std > 3 | res.std < -3)
-
-#add UID next to points that have extreme value
-if(length(index)>0){
-  text(index-20, res.std[index] , labels = myDataset$UID[index])
-  }
-print(index)
-```
-
-*Bonferroni p-value for testing outlier*
-```{r Bonferroni p-values}
-#Bonferroni p-values for testing outliner identifies another outlier, but p > 0.05
-myBonf <- outlierTest(myModel)
+myLM_DFM_aug_df[1:(dim(df)[1]/3-1),]%>%
+  knitr::kable()%>%
+column_spec(1, width = myLongText)%>%column_spec(2, width = myLongText)%>%column_spec(3, width = "4em")
 
 ```
 
-*Checking the leverage*
-```{r Checking the leverage}
-### Checking the leverage
-#a vector containing the diagonal of the 'hat' matrix
-h <- influence(myModel)$hat
-#half normal plot of leverage from package faraway
-halfnorm(influence(myModel)$hat, ylab = "leverage")
-#the cut of value for cook's distance
-cutoff <- 4/((nrow(myDataset)-length(myModel$coefficients)-2))
-plot(myModel, which = 4, cook.levels = cutoff)
+## Predictions on the overall dataset - Part 02
+```{r}
+myLM_DFM_aug_df[(dim(df)[1]/3):(2*dim(df)[1]/3-1),]%>%
+  knitr::kable()%>%
+column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = "4em")
+
 ```
 
-*Checking the influence*
-```{r Checking the influence}
-### Checking the influence
-#cook's distance, studentized residuals, and leverage in the same plot
-influencePlot(myModel, main="Influence Plot", 
-              sub="Circle size is proportional to Cook's Distance" )
+## Predictions on the overall dataset - Part 03
+```{r}
+myLM_DFM_aug_df[(2*dim(df)[1]/3):(dim(df)[1]),]%>%
+  knitr::kable()%>%
+column_spec(2, width = myLongText)%>%column_spec(3, width = myLongText)%>%column_spec(4, width = "4em")
+
 ```
-
-*diagnostic plots to identify influential points*
-```{r diagnostic plots}
-# 4 diagnostic plots to identify influential points
-tryCatch({
-  infIndexPlot(myModel)
-  },
-  error=function(e){}
-  )
-```
-
-## Aanylsis of the residuals
-
-*Checking homoscedasticity*
-```{r Checking homoscedasticity,fig.margin = TRUE}
-### Checking homoscedasticity
-#residual vs. fitted value plot for Homoscedasticity
-plot(myModel$resid ~ myModel$fitted.values, main="Checking for Homoskedasticity")
-#add horizental line from 0
-abline(h = 0, lty = 2)
-```
-
-*Checking linearity*
-```{r Checking linearity, fig.fullwidth = TRUE}
-# make labels and margins smaller
-par(cex=1.5, mai=c(0.1,0.1,0.1,0.1))
-
-###Checking linearity
-#residual vs. fitted value and all predictors plus test for curvature
-
-tryCatch({
-residualPlots(myModel)
-  },
-  error=function(e){}
-  )
-```
-
-```{r Checking Issues of Independence }
-# Checking Issues of Independence 
-# Here there is no temporal data
-```
-
-
-```{r Checking Normality of residuals, fig.margin = TRUE}
-### Checking Normality of residuals
-qqnorm(myModel$resid)  #Normal Quantile to Quantile plot
-qqline(myModel$resid)
-```
-
-*VIF*
-```{r VIF,fig.fullwidth = TRUE}
-###VIF, variance inflation factor, is used to measure the degree of multicollinearity.
-if(multipleVar)
-  tryCatch(
-  {
-    car::vif(myModel)
-  },
-  error=function(e){}
-)
-```
-
-
-```{r Check Omitted Variables}
-# Check Omitted Variables
-# avPlots(myModel)
-```
-
